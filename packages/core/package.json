@@ -1,0 +1,46 @@
+{
+  "name": "@flowsta/auth-sdk",
+  "version": "0.1.0",
+  "description": "Flowsta Authentication SDK - Censorship-resistant SSO for web applications",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc && vite build",
+    "test": "echo 'Tests not yet implemented'",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "authentication",
+    "sso",
+    "holochain",
+    "auth",
+    "censorship-resistant"
+  ],
+  "author": "Flowsta",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  },
+  "peerDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "flowsta-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Flowsta Authentication SDK - Monorepo",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "keywords": ["authentication", "holochain", "sso", "censorship-resistant"],
+  "author": "Flowsta",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git"
+  }
+}
+
