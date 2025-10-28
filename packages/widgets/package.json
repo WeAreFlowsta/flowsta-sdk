@@ -1,0 +1,81 @@
+{
+  "name": "@flowsta/auth-widgets",
+  "version": "0.1.0",
+  "description": "Embeddable authentication widgets for Flowsta Auth - recovery phrase, email verification, and account recovery",
+  "author": "Flowsta <hello@flowsta.com>",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./styles": "./dist/styles.css"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "flowsta",
+    "auth",
+    "authentication",
+    "widgets",
+    "recovery-phrase",
+    "email-verification",
+    "account-recovery",
+    "web-components",
+    "shadow-dom",
+    "zero-knowledge",
+    "holochain"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeAreFlowsta/FlowstaAuth.git",
+    "directory": "sdk-monorepo/packages/widgets"
+  },
+  "bugs": {
+    "url": "https://github.com/WeAreFlowsta/FlowstaAuth/issues"
+  },
+  "homepage": "https://flowsta.com/docs/widgets",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "dompurify": "^3.0.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.1",
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^20.10.5",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vitest/coverage-v8": "^1.0.4",
+    "eslint": "^8.56.0",
+    "happy-dom": "^12.10.3",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "vite-plugin-dts": "^3.7.0",
+    "vitest": "^1.0.4"
+  },
+  "peerDependencies": {},
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
+

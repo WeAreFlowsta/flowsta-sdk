@@ -1,0 +1,305 @@
+/**
+ * Component Styles
+ * Additional styles for UI components
+ */
+
+/* Button variants */
+.flowsta-button-small {
+  padding: 0.5rem 1rem;
+  font-size: var(--flowsta-font-size-small, 0.875rem);
+}
+
+.flowsta-button-large {
+  padding: 1rem 2rem;
+  font-size: var(--flowsta-font-size-large, 1.125rem);
+}
+
+.flowsta-button-full-width {
+  width: 100%;
+}
+
+.flowsta-button-ghost {
+  background: transparent;
+  color: var(--flowsta-color-text, #f9fafb);
+  border: 1px solid var(--flowsta-color-border, #374151);
+}
+
+.flowsta-button-ghost:hover:not(:disabled) {
+  background-color: var(--flowsta-color-hover, #4b5563);
+}
+
+/* Button group */
+.flowsta-button-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Input group */
+.flowsta-input-group {
+  width: 100%;
+  margin-bottom: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-input-label {
+  display: block;
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  font-weight: var(--flowsta-font-weight-medium, 500);
+  color: var(--flowsta-color-text, #f9fafb);
+  margin-bottom: var(--flowsta-spacing-small, 0.5rem);
+}
+
+.flowsta-input-required {
+  color: var(--flowsta-color-error, #ef4444);
+}
+
+.flowsta-input-helper {
+  font-size: var(--flowsta-font-size-small, 0.875rem);
+  color: var(--flowsta-color-text-muted, #9ca3af);
+  margin-top: var(--flowsta-spacing-small, 0.5rem);
+}
+
+.flowsta-input-error {
+  border-color: var(--flowsta-color-error, #ef4444);
+}
+
+.flowsta-input-error:focus {
+  border-color: var(--flowsta-color-error, #ef4444);
+  outline-color: var(--flowsta-color-error, #ef4444);
+}
+
+.flowsta-input-error-text {
+  font-size: var(--flowsta-font-size-small, 0.875rem);
+  color: var(--flowsta-color-error, #ef4444);
+  margin-top: var(--flowsta-spacing-small, 0.5rem);
+}
+
+/* Checkbox */
+.flowsta-checkbox {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--flowsta-spacing-small, 0.5rem);
+  cursor: pointer;
+  user-select: none;
+}
+
+.flowsta-checkbox input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  border: 1px solid var(--flowsta-color-border, #374151);
+  background-color: var(--flowsta-color-background, #1f2937);
+  margin: 0;
+}
+
+.flowsta-checkbox input[type="checkbox"]:checked {
+  background-color: var(--flowsta-color-primary, #6366f1);
+  border-color: var(--flowsta-color-primary, #6366f1);
+}
+
+.flowsta-checkbox input[type="checkbox"]:focus {
+  outline: 2px solid var(--flowsta-color-primary, #6366f1);
+  outline-offset: 2px;
+}
+
+.flowsta-checkbox input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.flowsta-checkbox-label {
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  color: var(--flowsta-color-text, #f9fafb);
+  line-height: 1.5;
+}
+
+.flowsta-checkbox-disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.flowsta-checkbox-disabled input[type="checkbox"] {
+  cursor: not-allowed !important;
+}
+
+/* Card */
+.flowsta-card {
+  background-color: var(--flowsta-color-background, #1f2937);
+  border: 1px solid var(--flowsta-color-border, #374151);
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  padding: var(--flowsta-spacing-large, 1.5rem);
+  box-shadow: var(--flowsta-shadow-medium, 0 4px 6px -1px rgb(0 0 0 / 0.1));
+}
+
+.flowsta-card-header {
+  margin-bottom: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-card-body {
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-card-footer {
+  margin-top: var(--flowsta-spacing-medium, 1rem);
+  padding-top: var(--flowsta-spacing-medium, 1rem);
+  border-top: 1px solid var(--flowsta-color-border, #374151);
+}
+
+/* Modal specific styles (additional to base.css) */
+.flowsta-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+}
+
+.flowsta-modal {
+  background-color: var(--flowsta-color-background, #1f2937);
+  border: 1px solid var(--flowsta-color-border, #374151);
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  box-shadow: var(--flowsta-shadow-large, 0 10px 15px -3px rgb(0 0 0 / 0.1));
+  max-width: 42rem;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(2rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.flowsta-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--flowsta-color-border, #374151);
+}
+
+.flowsta-modal-title {
+  font-size: var(--flowsta-font-size-xlarge, 1.5rem);
+  font-weight: var(--flowsta-font-weight-bold, 700);
+  color: var(--flowsta-color-text, #f9fafb);
+  margin: 0;
+}
+
+.flowsta-modal-close {
+  background: none;
+  border: none;
+  color: var(--flowsta-color-text-muted, #9ca3af);
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flowsta-modal-close:hover {
+  background-color: var(--flowsta-color-hover, #4b5563);
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-modal-close:focus {
+  outline: 2px solid var(--flowsta-color-primary, #6366f1);
+  outline-offset: 2px;
+}
+
+.flowsta-modal-close svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.flowsta-modal-body {
+  padding: 1.5rem;
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-modal-footer {
+  padding: 1.5rem;
+  border-top: 1px solid var(--flowsta-color-border, #374151);
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .flowsta-modal {
+    max-width: 100%;
+    margin: 0.5rem;
+  }
+
+  .flowsta-modal-header,
+  .flowsta-modal-body,
+  .flowsta-modal-footer {
+    padding: 1rem;
+  }
+
+  .flowsta-button-group {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .flowsta-button-group .flowsta-button {
+    width: 100%;
+  }
+
+  .flowsta-modal-footer {
+    flex-direction: column-reverse;
+  }
+
+  .flowsta-modal-footer .flowsta-button {
+    width: 100%;
+  }
+}
+
+/* Focus visible styles for better accessibility */
+.flowsta-button:focus-visible,
+.flowsta-input:focus-visible,
+.flowsta-checkbox input:focus-visible {
+  outline: 2px solid var(--flowsta-color-primary, #6366f1);
+  outline-offset: 2px;
+}
+
+/* Loading state for buttons */
+.flowsta-button[data-loading="true"] {
+  position: relative;
+  color: transparent;
+}
+
+.flowsta-button[data-loading="true"] .flowsta-spinner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+

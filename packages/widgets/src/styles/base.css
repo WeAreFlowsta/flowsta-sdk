@@ -1,0 +1,347 @@
+/**
+ * Base Styles
+ * Foundation styles for all Flowsta Auth Widgets
+ */
+
+/* Reset and base styles */
+.flowsta-widget-root {
+  all: initial;
+  font-family: var(--flowsta-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  line-height: 1.5;
+  color: var(--flowsta-color-text, #f9fafb);
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.flowsta-widget-root *,
+.flowsta-widget-root *::before,
+.flowsta-widget-root *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Typography */
+.flowsta-heading-1 {
+  font-size: var(--flowsta-font-size-xlarge, 1.5rem);
+  font-weight: var(--flowsta-font-weight-bold, 700);
+  color: var(--flowsta-color-text, #f9fafb);
+  margin-bottom: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-heading-2 {
+  font-size: var(--flowsta-font-size-large, 1.125rem);
+  font-weight: var(--flowsta-font-weight-semibold, 600);
+  color: var(--flowsta-color-text, #f9fafb);
+  margin-bottom: var(--flowsta-spacing-small, 0.5rem);
+}
+
+.flowsta-text {
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-text-small {
+  font-size: var(--flowsta-font-size-small, 0.875rem);
+  color: var(--flowsta-color-text-muted, #9ca3af);
+}
+
+/* Buttons */
+.flowsta-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  font-weight: var(--flowsta-font-weight-medium, 500);
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.flowsta-button:focus {
+  outline: 2px solid var(--flowsta-color-primary, #6366f1);
+  outline-offset: 2px;
+}
+
+.flowsta-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.flowsta-button-primary {
+  background-color: var(--flowsta-color-primary, #6366f1);
+  color: white;
+}
+
+.flowsta-button-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.flowsta-button-secondary {
+  background-color: var(--flowsta-color-hover, #4b5563);
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-button-secondary:hover:not(:disabled) {
+  background-color: var(--flowsta-color-border, #374151);
+}
+
+.flowsta-button-danger {
+  background-color: var(--flowsta-color-error, #ef4444);
+  color: white;
+}
+
+.flowsta-button-danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Inputs */
+.flowsta-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  font-family: inherit;
+  color: var(--flowsta-color-text, #f9fafb);
+  background-color: var(--flowsta-color-background, #1f2937);
+  border: 1px solid var(--flowsta-color-border, #374151);
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  transition: border-color 0.2s ease;
+}
+
+.flowsta-input:focus {
+  outline: none;
+  border-color: var(--flowsta-color-primary, #6366f1);
+}
+
+.flowsta-input::placeholder {
+  color: var(--flowsta-color-text-muted, #9ca3af);
+}
+
+.flowsta-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Checkbox */
+.flowsta-checkbox {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  gap: 0.5rem;
+}
+
+.flowsta-checkbox input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+
+.flowsta-checkbox-label {
+  font-size: var(--flowsta-font-size-medium, 1rem);
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+/* Card */
+.flowsta-card {
+  background-color: var(--flowsta-color-background, #1f2937);
+  border: 1px solid var(--flowsta-color-border, #374151);
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  padding: var(--flowsta-spacing-large, 1.5rem);
+  box-shadow: var(--flowsta-shadow-medium, 0 4px 6px -1px rgb(0 0 0 / 0.1));
+}
+
+/* Modal backdrop */
+.flowsta-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.flowsta-modal {
+  background-color: var(--flowsta-color-background, #1f2937);
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  box-shadow: var(--flowsta-shadow-large, 0 10px 15px -3px rgb(0 0 0 / 0.1));
+  max-width: 42rem;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(2rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.flowsta-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--flowsta-color-border, #374151);
+}
+
+.flowsta-modal-title {
+  font-size: var(--flowsta-font-size-xlarge, 1.5rem);
+  font-weight: var(--flowsta-font-weight-bold, 700);
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-modal-close {
+  background: none;
+  border: none;
+  color: var(--flowsta-color-text-muted, #9ca3af);
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.2s ease;
+}
+
+.flowsta-modal-close:hover {
+  background-color: var(--flowsta-color-hover, #4b5563);
+  color: var(--flowsta-color-text, #f9fafb);
+}
+
+.flowsta-modal-body {
+  padding: 1.5rem;
+}
+
+.flowsta-modal-footer {
+  padding: 1.5rem;
+  border-top: 1px solid var(--flowsta-color-border, #374151);
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+/* Alert messages */
+.flowsta-alert {
+  padding: 1rem;
+  border-radius: var(--flowsta-border-radius, 0.5rem);
+  margin-bottom: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-alert-success {
+  background-color: rgba(16, 185, 129, 0.1);
+  border: 1px solid var(--flowsta-color-success, #10b981);
+  color: var(--flowsta-color-success, #10b981);
+}
+
+.flowsta-alert-warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid var(--flowsta-color-warning, #f59e0b);
+  color: var(--flowsta-color-warning, #f59e0b);
+}
+
+.flowsta-alert-error {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--flowsta-color-error, #ef4444);
+  color: var(--flowsta-color-error, #ef4444);
+}
+
+/* Loading spinner */
+.flowsta-spinner {
+  display: inline-block;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: var(--flowsta-color-primary, #6366f1);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Utility classes */
+.flowsta-flex {
+  display: flex;
+}
+
+.flowsta-flex-col {
+  flex-direction: column;
+}
+
+.flowsta-gap-sm {
+  gap: var(--flowsta-spacing-small, 0.5rem);
+}
+
+.flowsta-gap-md {
+  gap: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-gap-lg {
+  gap: var(--flowsta-spacing-large, 1.5rem);
+}
+
+.flowsta-mt-sm {
+  margin-top: var(--flowsta-spacing-small, 0.5rem);
+}
+
+.flowsta-mt-md {
+  margin-top: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-mt-lg {
+  margin-top: var(--flowsta-spacing-large, 1.5rem);
+}
+
+.flowsta-mb-sm {
+  margin-bottom: var(--flowsta-spacing-small, 0.5rem);
+}
+
+.flowsta-mb-md {
+  margin-bottom: var(--flowsta-spacing-medium, 1rem);
+}
+
+.flowsta-mb-lg {
+  margin-bottom: var(--flowsta-spacing-large, 1.5rem);
+}
+
+/* Powered by footer */
+.flowsta-powered-by {
+  text-align: center;
+  padding-top: var(--flowsta-spacing-medium, 1rem);
+  font-size: var(--flowsta-font-size-small, 0.875rem);
+  color: var(--flowsta-color-text-muted, #9ca3af);
+}
+
+.flowsta-powered-by a {
+  color: var(--flowsta-color-primary, #6366f1);
+  text-decoration: none;
+}
+
+.flowsta-powered-by a:hover {
+  text-decoration: underline;
+}
+

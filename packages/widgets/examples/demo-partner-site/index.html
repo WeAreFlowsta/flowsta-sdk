@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flowsta Widgets - Development Sandbox</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 2rem;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      color: #667eea;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .card h2 {
+      color: #667eea;
+      margin-bottom: 1rem;
+      font-size: 1.25rem;
+    }
+
+    .card p {
+      color: #6b7280;
+      margin-bottom: 1rem;
+      line-height: 1.6;
+    }
+
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+    }
+
+    button:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    button:disabled {
+      background: #d1d5db;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .status {
+      background: #f3f4f6;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.875rem;
+    }
+
+    .status-item {
+      margin-bottom: 0.5rem;
+    }
+
+    .status-item strong {
+      color: #667eea;
+    }
+
+    .widget-container {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    #widget-mount {
+      min-height: 200px;
+    }
+
+    .coming-soon {
+      opacity: 0.6;
+    }
+
+    .coming-soon button {
+      background: #d1d5db;
+      cursor: not-allowed;
+    }
+
+    .coming-soon button:hover {
+      transform: none;
+      background: #d1d5db;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎨 Flowsta Widgets - Development Sandbox</h1>
+      <p class="subtitle">Test and develop Flowsta Auth widgets locally</p>
+    </header>
+
+    <div class="card">
+      <h2>📊 System Status</h2>
+      <div class="status">
+        <div class="status-item"><strong>Package:</strong> @flowsta/auth-widgets v0.1.0</div>
+        <div class="status-item"><strong>Environment:</strong> Development</div>
+        <div class="status-item"><strong>API URL:</strong> https://api.flowsta.com</div>
+        <div class="status-item"><strong>Client ID:</strong> demo-client-id</div>
+        <div class="status-item"><strong>Status:</strong> <span id="status">Initializing...</span></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>🔐 Recovery Phrase Widget</h2>
+        <p>Guides users through setting up and verifying their 24-word recovery phrase.</p>
+        <button onclick="showRecoveryPhraseWidget()">
+          Launch Widget
+          <span class="badge" style="background: #10b981; color: white;">✅ Ready</span>
+        </button>
+      </div>
+
+      <div class="card">
+        <h2>✉️ Email Verification Widget</h2>
+        <p>Prompts users to verify their email address with customizable display modes.</p>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <button onclick="showEmailVerificationWidget('banner')">
+            Banner Mode
+            <span class="badge" style="background: #10b981; color: white;">✅ Ready</span>
+          </button>
+          <button onclick="showEmailVerificationWidget('modal')">
+            Modal Mode
+            <span class="badge" style="background: #10b981; color: white;">✅ Ready</span>
+          </button>
+          <button onclick="showEmailVerificationWidget('inline')">
+            Inline Mode
+            <span class="badge" style="background: #10b981; color: white;">✅ Ready</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🔑 Account Recovery Widget</h2>
+        <p>Helps users recover their accounts using their recovery phrase.</p>
+        <button onclick="showAccountRecoveryWidget()">
+          Launch Widget
+          <span class="badge" style="background: #10b981; color: white;">✅ Ready</span>
+        </button>
+      </div>
+
+      <div class="card">
+        <h2>🛡️ Security Dashboard Widget</h2>
+        <p>Displays account security status and quick action buttons.</p>
+        <button onclick="showSecurityDashboardWidget()">
+          Launch Widget
+          <span class="badge" style="background: #10b981; color: white;">✅ Ready</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="widget-container">
+      <h2 style="color: #667eea; margin-bottom: 1.5rem;">Widget Preview</h2>
+      <div id="widget-mount"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Import widgets
+    import { 
+      RecoveryPhraseWidget, 
+      EmailVerificationWidget,
+      AccountRecoveryWidget,
+      SecurityDashboardWidget 
+    } from '../../dist/index.esm.js';
+
+    // Update status
+    document.getElementById('status').textContent = '✅ All 4 Widgets Ready!';
+
+    // Global reference to current widget
+    let currentWidget = null;
+
+    /**
+     * Show Recovery Phrase Widget
+     */
+    window.showRecoveryPhraseWidget = async () => {
+      const container = document.getElementById('widget-mount');
+      container.innerHTML = '';
+
+      // Destroy previous widget if exists
+      if (currentWidget) {
+        currentWidget.destroy();
+      }
+
+      try {
+        // Create widget instance
+        currentWidget = new RecoveryPhraseWidget(container, {
+          clientId: 'demo-client-id',
+          brandingColor: '#667eea',
+          branding: {
+            companyName: 'Demo Partner Site',
+            brandingColor: '#667eea',
+            showPoweredBy: true,
+          },
+          apiUrl: 'https://api.flowsta.com',
+          getAuthToken: () => {
+            // In production, get real token from localStorage/session
+            return 'demo-token-123';
+          },
+          allowDismiss: true,
+          autoShow: false,
+          debug: true,
+          onComplete: async (verified) => {
+            console.log('✅ Recovery phrase setup complete!', { verified });
+            alert('🎉 Recovery phrase setup complete! In production, you would redirect to the dashboard.');
+          },
+          onDismiss: async () => {
+            console.log('⚠️ User dismissed recovery phrase setup');
+            alert('⚠️ Remember to set up your recovery phrase later!');
+          },
+          onError: async (error) => {
+            console.error('❌ Widget error:', error);
+            alert(`Error: ${error.message}`);
+          },
+        });
+
+        // Initialize and show
+        await currentWidget.initialize();
+        currentWidget.show();
+
+        console.log('✅ Recovery Phrase Widget initialized');
+      } catch (error) {
+        console.error('Failed to initialize widget:', error);
+        alert(`Failed to load widget: ${error.message}`);
+      }
+    };
+
+    /**
+     * Show Email Verification Widget
+     */
+    window.showEmailVerificationWidget = async (mode = 'banner') => {
+      const container = document.getElementById('widget-mount');
+      container.innerHTML = '';
+
+      // Destroy previous widget if exists
+      if (currentWidget) {
+        currentWidget.destroy();
+      }
+
+      try {
+        // Create widget instance
+        currentWidget = new EmailVerificationWidget(container, {
+          clientId: 'demo-client-id',
+          mode: mode, // 'banner', 'modal', or 'inline'
+          branding: {
+            companyName: 'Demo Partner Site',
+            brandingColor: '#667eea',
+          },
+          apiUrl: 'https://api.flowsta.com',
+          getAuthToken: () => {
+            // In production, get real token from localStorage/session
+            return 'demo-token-123';
+          },
+          dismissible: true,
+          resendCooldown: 60, // seconds
+          autoCheckInterval: true, // Check for verification every 5s
+          debug: true,
+          customMessages: {
+            title: mode === 'banner' ? 'Verify Your Email' : 'Email Verification Required',
+            description: mode === 'inline' 
+              ? 'Please verify your email to unlock all features.'
+              : 'We\'ve sent a verification link to your email. Please check your inbox.',
+          },
+          onVerified: async () => {
+            console.log('✅ Email verified!');
+            alert('🎉 Email verified! In production, you would refresh user data.');
+          },
+          onResend: async () => {
+            console.log('📧 Verification email resent');
+          },
+          onDismiss: async () => {
+            console.log('⚠️ User dismissed email verification');
+            alert('⚠️ Don\'t forget to verify your email!');
+          },
+          onError: async (error) => {
+            console.error('❌ Widget error:', error);
+            alert(`Error: ${error.message}`);
+          },
+        });
+
+        // Initialize
+        await currentWidget.initialize();
+
+        // For inline mode, explicitly show
+        if (mode === 'inline') {
+          currentWidget.show();
+        }
+
+        console.log(`✅ Email Verification Widget initialized (${mode} mode)`);
+      } catch (error) {
+        console.error('Failed to initialize widget:', error);
+        alert(`Failed to load widget: ${error.message}`);
+      }
+    };
+
+    /**
+     * Show Account Recovery Widget
+     */
+    window.showAccountRecoveryWidget = async () => {
+      const container = document.getElementById('widget-mount');
+      container.innerHTML = '';
+
+      // Destroy previous widget if exists
+      if (currentWidget) {
+        currentWidget.destroy();
+      }
+
+      try {
+        // Create widget instance
+        currentWidget = new AccountRecoveryWidget(container, {
+          clientId: 'demo-client-id',
+          branding: {
+            companyName: 'Demo Partner Site',
+            brandingColor: '#667eea',
+          },
+          apiUrl: 'https://api.flowsta.com',
+          // email: 'user@example.com', // Optional: pre-fill email
+          debug: true,
+          onRecoveryComplete: async (success) => {
+            console.log('✅ Account recovered!', { success });
+            alert('🎉 Account recovered! In production, you would redirect to login.');
+          },
+          onCancel: async () => {
+            console.log('⚠️ User cancelled recovery');
+            alert('Account recovery cancelled.');
+          },
+          onError: async (error) => {
+            console.error('❌ Widget error:', error);
+            alert(`Error: ${error.message}`);
+          },
+        });
+
+        // Initialize and show
+        await currentWidget.initialize();
+        currentWidget.show();
+
+        console.log('✅ Account Recovery Widget initialized');
+      } catch (error) {
+        console.error('Failed to initialize widget:', error);
+        alert(`Failed to load widget: ${error.message}`);
+      }
+    };
+
+    /**
+     * Show Security Dashboard Widget
+     */
+    window.showSecurityDashboardWidget = async () => {
+      const container = document.getElementById('widget-mount');
+      container.innerHTML = '';
+
+      // Destroy previous widget if exists
+      if (currentWidget) {
+        currentWidget.destroy();
+      }
+
+      try {
+        // Create widget instance
+        currentWidget = new SecurityDashboardWidget(container, {
+          clientId: 'demo-client-id',
+          branding: {
+            companyName: 'Demo Partner Site',
+            brandingColor: '#667eea',
+          },
+          apiUrl: 'https://api.flowsta.com',
+          getAuthToken: () => {
+            return 'demo-token-123';
+          },
+          showRecoveryPhrase: true,
+          showEmailVerification: true,
+          showPasswordChange: true,
+          debug: true,
+          onRecoveryPhraseSetup: () => {
+            console.log('🔐 Recovery phrase setup clicked');
+            alert('Would show Recovery Phrase Widget');
+          },
+          onPasswordChange: () => {
+            console.log('🔒 Password change clicked');
+            alert('Would show Password Change Modal');
+          },
+          onError: async (error) => {
+            console.error('❌ Widget error:', error);
+            alert(`Error: ${error.message}`);
+          },
+        });
+
+        // Initialize and show
+        await currentWidget.initialize();
+        currentWidget.show();
+
+        console.log('✅ Security Dashboard Widget initialized');
+      } catch (error) {
+        console.error('Failed to initialize widget:', error);
+        alert(`Failed to load widget: ${error.message}`);
+      }
+    };
+  </script>
+</body>
+</html>
+
