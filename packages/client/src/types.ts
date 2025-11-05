@@ -93,6 +93,110 @@ export interface GetUserResult {
 }
 
 /**
+ * Block user input
+ */
+export interface BlockUserInput {
+  userId: string;
+  reason?: string;
+}
+
+/**
+ * Block user result
+ */
+export interface BlockUserResult {
+  success: boolean;
+  message: string;
+  blockedUser: {
+    userId: string;
+    blockedAt: string;
+    reason: string | null;
+  };
+}
+
+/**
+ * Unblock user input
+ */
+export interface UnblockUserInput {
+  userId: string;
+}
+
+/**
+ * Unblock user result
+ */
+export interface UnblockUserResult {
+  success: boolean;
+  message: string;
+  unblockedUser: {
+    userId: string;
+    unblockedAt: string;
+  };
+}
+
+/**
+ * Blocked user
+ */
+export interface BlockedUser {
+  userId: string;
+  displayName: string | null;
+  email: string; // Email hash
+  did: string | null;
+  blockedAt: string;
+  reason: string | null;
+}
+
+/**
+ * Blocked users pagination
+ */
+export interface BlockedUsersPagination {
+  page: number;
+  limit: number;
+  totalBlocked: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+/**
+ * Get blocked users result
+ */
+export interface GetBlockedUsersResult {
+  success: boolean;
+  blockedUsers: BlockedUser[];
+  pagination: BlockedUsersPagination;
+}
+
+/**
+ * Check user status result
+ */
+export interface CheckUserStatusResult {
+  success: boolean;
+  userId: string;
+  isBlocked: boolean;
+  blockDetails: {
+    blockedAt: string;
+    reason: string | null;
+  } | null;
+}
+
+/**
+ * Site statistics
+ */
+export interface SiteStats {
+  totalBlockedUsers: number;
+  blocksLast30Days: number;
+  totalActiveUsers: number;
+  siteName: string;
+  siteId: string;
+}
+
+/**
+ * Get site stats result
+ */
+export interface GetSiteStatsResult {
+  success: boolean;
+  stats: SiteStats;
+}
+
+/**
  * API Error
  */
 export interface FlowstaError {

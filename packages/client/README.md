@@ -78,6 +78,8 @@ const flowsta = new FlowstaClient(config: FlowstaClientConfig);
 
 ### Methods
 
+#### Authentication Methods
+
 #### `registerUser(input: RegisterInput): Promise<AuthResult>`
 
 Register a new user. **Requires `clientSecret`** (server-side only).
@@ -155,6 +157,123 @@ const result = await flowsta.getUser(token);
 //     verified: false,
 //     createdAt: '2024-10-20T10:30:00.000Z',
 //     updatedAt: '2024-10-20T10:30:00.000Z'
+//   }
+// }
+```
+
+---
+
+#### Site Blocklist Management
+
+> **Note**: Blocklist operations allow you to manage user access to your specific site without affecting their Flowsta identity or access to other sites.
+
+#### `blockUser(input: BlockUserInput): Promise<BlockUserResult>`
+
+Block a user from accessing your site. **Requires `clientSecret`** (server-side only).
+
+```typescript
+const result = await flowsta.blockUser({
+  userId: '550e8400-e29b-41d4-a716-446655440000',
+  reason: 'Violation of community guidelines' // Optional
+});
+
+// Returns:
+// {
+//   success: true,
+//   message: 'User blocked successfully',
+//   blockedUser: {
+//     userId: '550e8400-e29b-41d4-a716-446655440000',
+//     blockedAt: '2025-11-05T10:30:00.000Z',
+//     reason: 'Violation of community guidelines'
+//   }
+// }
+```
+
+#### `unblockUser(input: UnblockUserInput): Promise<UnblockUserResult>`
+
+Remove a user from your site's blocklist. **Requires `clientSecret`** (server-side only).
+
+```typescript
+const result = await flowsta.unblockUser({
+  userId: '550e8400-e29b-41d4-a716-446655440000'
+});
+
+// Returns:
+// {
+//   success: true,
+//   message: 'User unblocked successfully',
+//   unblockedUser: {
+//     userId: '550e8400-e29b-41d4-a716-446655440000',
+//     unblockedAt: '2025-11-05T11:00:00.000Z'
+//   }
+// }
+```
+
+#### `getBlockedUsers(page?: number, limit?: number): Promise<GetBlockedUsersResult>`
+
+Get paginated list of all blocked users for your site. **Does not require `clientSecret`** (read operation).
+
+```typescript
+const result = await flowsta.getBlockedUsers(1, 50);
+
+// Returns:
+// {
+//   success: true,
+//   blockedUsers: [
+//     {
+//       userId: '550e8400-e29b-41d4-a716-446655440000',
+//       displayName: 'John Doe',
+//       email: 'a1b2c3...', // Hashed email
+//       did: 'did:flowsta:uhCAkSomeAgentPubKeyHash',
+//       blockedAt: '2025-11-05T10:30:00.000Z',
+//       reason: 'Violation of community guidelines'
+//     }
+//   ],
+//   pagination: {
+//     page: 1,
+//     limit: 50,
+//     totalBlocked: 127,
+//     totalPages: 3,
+//     hasMore: true
+//   }
+// }
+```
+
+#### `checkUserStatus(userId: string): Promise<CheckUserStatusResult>`
+
+Check if a specific user is blocked from your site. **Does not require `clientSecret`** (read operation).
+
+```typescript
+const result = await flowsta.checkUserStatus('550e8400-e29b-41d4-a716-446655440000');
+
+// Returns:
+// {
+//   success: true,
+//   userId: '550e8400-e29b-41d4-a716-446655440000',
+//   isBlocked: true,
+//   blockDetails: {
+//     blockedAt: '2025-11-05T10:30:00.000Z',
+//     reason: 'Violation of community guidelines'
+//   }
+// }
+```
+
+#### `getSiteStats(): Promise<GetSiteStatsResult>`
+
+Get statistics about your site's blocklist and users. **Does not require `clientSecret`** (read operation).
+
+```typescript
+const result = await flowsta.getSiteStats();
+
+// Returns:
+// {
+//   success: true,
+//   stats: {
+//     totalBlockedUsers: 127,
+//     blocksLast30Days: 15,
+//     totalActiveUsers: 5432,
+//     siteName: 'My Awesome App',
+//     siteId: '770e8400-e29b-41d4-a716-446655440222'
 //   }
 // }
 ```

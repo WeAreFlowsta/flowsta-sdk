@@ -15,6 +15,16 @@ export type {
   RefreshResult,
   GetUserResult,
   FlowstaError,
+  BlockUserInput,
+  BlockUserResult,
+  UnblockUserInput,
+  UnblockUserResult,
+  BlockedUser,
+  BlockedUsersPagination,
+  GetBlockedUsersResult,
+  CheckUserStatusResult,
+  SiteStats,
+  GetSiteStatsResult,
 } from './types';
 
 export {

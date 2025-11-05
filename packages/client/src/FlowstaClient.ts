@@ -130,6 +130,72 @@ export class FlowstaClient {
   }
 
   /**
+   * Block a user from your site
+   * Requires: clientSecret (server-side only)
+   */
+  async blockUser(input: import('./types').BlockUserInput): Promise<import('./types').BlockUserResult> {
+    this.requireClientSecret('blockUser');
+
+    return this.request<import('./types').BlockUserResult>('/sites/block-user', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      requiresSecret: true,
+    });
+  }
+
+  /**
+   * Unblock a user from your site
+   * Requires: clientSecret (server-side only)
+   */
+  async unblockUser(input: import('./types').UnblockUserInput): Promise<import('./types').UnblockUserResult> {
+    this.requireClientSecret('unblockUser');
+
+    return this.request<import('./types').UnblockUserResult>('/sites/unblock-user', {
+      method: 'DELETE',
+      body: JSON.stringify(input),
+      requiresSecret: true,
+    });
+  }
+
+  /**
+   * Get paginated list of blocked users for your site
+   * Requires: clientId only (can be used client-side for read)
+   */
+  async getBlockedUsers(page: number = 1, limit: number = 50): Promise<import('./types').GetBlockedUsersResult> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+
+    return this.request<import('./types').GetBlockedUsersResult>(`/sites/blocked-users?${params}`, {
+      method: 'GET',
+      requiresSecret: false,
+    });
+  }
+
+  /**
+   * Check if a specific user is blocked from your site
+   * Requires: clientId only (can be used client-side for read)
+   */
+  async checkUserStatus(userId: string): Promise<import('./types').CheckUserStatusResult> {
+    return this.request<import('./types').CheckUserStatusResult>(`/sites/check-user-status/${userId}`, {
+      method: 'GET',
+      requiresSecret: false,
+    });
+  }
+
+  /**
+   * Get statistics about your site's blocklist
+   * Requires: clientId only (can be used client-side for read)
+   */
+  async getSiteStats(): Promise<import('./types').GetSiteStatsResult> {
+    return this.request<import('./types').GetSiteStatsResult>('/sites/stats', {
+      method: 'GET',
+      requiresSecret: false,
+    });
+  }
+
+  /**
    * Make an authenticated request to the Flowsta API
    */
   private async request<T>(
