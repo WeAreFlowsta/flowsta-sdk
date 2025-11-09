@@ -105,3 +105,20 @@ export interface VueFlowstaLoginButtonEvents {
   click: () => void;
 }
 
+/**
+ * Props for Qwik component
+ */
+export interface FlowstaLoginButtonQwikProps extends FlowstaLoginConfig {
+  /** Callback when login succeeds (Qwik QRL) */
+  onSuccess$?: (data: FlowstaLoginSuccess) => void;
+  
+  /** Callback when login fails (Qwik QRL) */
+  onError$?: (error: FlowstaLoginError) => void;
+  
+  /** Callback when button is clicked (before redirect, Qwik QRL) */
+  onClick$?: () => void;
+  
+  /** Custom CSS class name */
+  class?: string;
+}
+

@@ -1,6 +1,6 @@
 # @flowsta/login-button
 
-**Login with Flowsta** button components for React, Vue, and vanilla JavaScript.
+**Login with Flowsta** button components for React, Vue, Qwik, and vanilla JavaScript.
 
 Easily integrate OAuth 2.0 authentication with Flowsta into your web application using pre-designed, production-ready button components.
 
@@ -10,11 +10,12 @@ Easily integrate OAuth 2.0 authentication with Flowsta into your web application
 ## Features
 
 - ✅ **6 Button Variants** - Dark, light, and neutral themes with pill or rectangle shapes
-- ✅ **Framework Support** - React, Vue 3, and vanilla JavaScript
+- ✅ **Framework Support** - React, Vue 3, Qwik, and vanilla JavaScript
 - ✅ **PKCE Built-in** - Secure OAuth 2.0 with Proof Key for Code Exchange
 - ✅ **TypeScript** - Full type definitions included
 - ✅ **Zero Dependencies** - No external runtime dependencies
 - ✅ **Production Ready** - Professional button designs with proper accessibility
+- ✅ **Resumable** - Qwik support for instant-on apps
 
 ## Installation
 
@@ -74,6 +75,31 @@ const handleError = (error) => {
   console.error('Login error:', error);
 };
 </script>
+```
+
+### Qwik
+
+```tsx
+import { component$ } from '@builder.io/qwik';
+import { FlowstaLoginButton } from '@flowsta/login-button/qwik';
+
+export default component$(() => {
+  return (
+    <FlowstaLoginButton
+      clientId="your-client-id"
+      redirectUri="https://yourapp.com/callback"
+      scopes={['profile', 'email']}
+      variant="dark-pill"
+      onSuccess$={(data) => {
+        console.log('Authorization code:', data.code);
+        // Exchange code for token on your backend
+      }}
+      onError$={(error) => {
+        console.error('Login error:', error);
+      }}
+    />
+  );
+});
 ```
 
 ### Vanilla JavaScript
@@ -215,6 +241,16 @@ interface FlowstaLoginButtonProps {
 />
 ```
 
+#### Qwik
+
+```tsx
+<FlowstaLoginButton
+  onSuccess$={(data) => { /* code, state */ }}
+  onError$={(error) => { /* error, errorDescription */ }}
+  onClick$={() => { /* before redirect */ }}
+/>
+```
+
 #### Vanilla
 
 ```javascript
@@ -339,7 +375,9 @@ import type {
   FlowstaLoginConfig,
   FlowstaLoginSuccess,
   FlowstaLoginError,
-  FlowstaLoginButtonProps
+  FlowstaLoginButtonProps,
+  FlowstaLoginButtonQwikProps,
+  VueFlowstaLoginButtonProps
 } from '@flowsta/login-button';
 ```
 
