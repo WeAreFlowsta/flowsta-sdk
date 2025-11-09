@@ -1,0 +1,78 @@
+{
+  "name": "@flowsta/login-button",
+  "version": "0.1.0",
+  "description": "Login with Flowsta button components for React, Vue, and vanilla JavaScript",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./vue": {
+      "types": "./dist/vue.d.ts",
+      "import": "./dist/vue.js"
+    },
+    "./vanilla": {
+      "types": "./dist/vanilla.d.ts",
+      "import": "./dist/vanilla.js"
+    }
+  },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc && vite build",
+    "test": "echo 'Tests not yet implemented'",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "oauth",
+    "login",
+    "authentication",
+    "flowsta",
+    "sso",
+    "react",
+    "vue",
+    "button",
+    "pkce"
+  ],
+  "author": "Flowsta",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git",
+    "directory": "packages/login-button"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "vue": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "react": "^18.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vue": "^3.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
