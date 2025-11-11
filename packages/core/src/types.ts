@@ -18,10 +18,18 @@ export interface FlowstaUser {
   id: string;
   /** User email */
   email: string;
-  /** Holochain agent public key */
+  /** Holochain agent public key (uhCAk format) */
   agentPubKey: string;
+  /** W3C DID identifier */
+  did: string;
+  /** Display name */
+  displayName: string;
   /** Email verification status */
   emailVerified: boolean;
+  /** Profile picture (base64 data URI - identicon or custom) */
+  profilePicture: string;
+  /** Whether user has uploaded a custom profile picture */
+  hasCustomPicture: boolean;
   /** Account creation timestamp */
   createdAt?: string;
   /** Last login timestamp */

@@ -34,10 +34,17 @@ export interface FlowstaClientConfig {
 export interface FlowstaUser {
   id: string;
   email: string;
-  displayName: string | null;
-  verified: boolean;
-  createdAt: string;
-  updatedAt?: string;
+  displayName: string;
+  agentPubKey: string;
+  did: string;
+  emailVerified: boolean;
+  profilePicture: string;
+  hasCustomPicture: boolean;
+  createdAt?: string;
+  lastLoginAt?: string;
+  loginCount?: number;
+  dashboardVisitCount?: number;
+  isFirstDashboardVisit?: boolean;
 }
 
 /**
