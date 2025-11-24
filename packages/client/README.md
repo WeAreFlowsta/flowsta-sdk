@@ -426,11 +426,18 @@ import type {
    - Use `httpOnly` cookies for web apps
    - Use secure storage on mobile apps
 
-3. **Implement token refresh**
+3. **Handle session expiration (7-day timeout)**
+   - JWT tokens expire after 7 days
+   - Handle `401 Unauthorized` responses automatically
+   - Show friendly "Session Expired" message to users
+   - Redirect to login with saved return URL
+   - See: [Session Management Guide](https://docs.flowsta.com/security/sessions)
+
+4. **Implement token refresh**
    - Refresh tokens before they expire
    - Use refresh tokens for long-lived sessions
 
-4. **Validate tokens on every request**
+5. **Validate tokens on every request**
    - Don't trust client-side validation alone
    - Always verify tokens server-side
 
