@@ -1,0 +1,55 @@
+{
+  "name": "@flowsta/auth",
+  "version": "2.0.0",
+  "description": "Flowsta Auth SDK 2.0 - OAuth-only authentication for web applications",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react.mjs",
+      "require": "./dist/react.js",
+      "types": "./dist/react.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/react.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts src/react.ts --format cjs,esm --dts --watch",
+    "test": "vitest",
+    "lint": "eslint src"
+  },
+  "keywords": [
+    "flowsta",
+    "auth",
+    "authentication",
+    "oauth",
+    "sso",
+    "pkce",
+    "zero-knowledge"
+  ],
+  "author": "Flowsta",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "@types/react": "^18.2.0"
+  }
+}
+

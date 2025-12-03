@@ -18,6 +18,8 @@ export interface FlowstaUser {
   id: string;
   /** User email */
   email: string;
+  /** Username (optional, privacy-friendly alternative to email for login) */
+  username?: string | null;
   /** Holochain agent public key (uhCAk format) */
   agentPubKey: string;
   /** W3C DID identifier */
@@ -40,10 +42,13 @@ export interface RegisterInput {
   email: string;
   password: string;
   displayName?: string;
+  /** Username (optional, 3-30 chars, alphanumeric + underscore/hyphen, starts with letter) */
+  username?: string;
 }
 
 export interface LoginInput {
-  email: string;
+  /** Email or username */
+  emailOrUsername: string;
   password: string;
 }
 
