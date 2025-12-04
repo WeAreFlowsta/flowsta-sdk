@@ -1,7 +1,8 @@
 {
   "name": "@flowsta/auth-client",
   "version": "0.1.0",
-  "description": "Flowsta Auth Client SDK - Integrate Flowsta authentication into your application",
+  "deprecated": "This package is deprecated. Use @flowsta/auth (SDK 2.0) instead - it provides OAuth-only authentication with PKCE.",
+  "description": "⚠️ DEPRECATED - Use @flowsta/auth instead. Flowsta Auth Client SDK",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

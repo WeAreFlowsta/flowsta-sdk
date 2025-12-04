@@ -150,11 +150,12 @@ const auth = new FlowstaAuth({
 ```typescript
 interface FlowstaUser {
   id: string;
-  email?: string;
-  displayName?: string;
-  profilePicture?: string;
-  agentPubKey?: string;
-  did?: string;
+  email?: string;          // If 'email' scope was granted
+  username?: string;       // User's username (if set)
+  displayName?: string;    // Display name
+  profilePicture?: string; // Profile picture URL
+  agentPubKey?: string;    // Holochain agent public key
+  did?: string;            // Decentralized Identifier
 }
 ```
 

@@ -29,6 +29,8 @@ export interface FlowstaUser {
   id: string;
   /** User's email address (if 'email' scope was granted) */
   email?: string;
+  /** User's username (if set) */
+  username?: string;
   /** User's display name */
   displayName?: string;
   /** User's profile picture URL */
@@ -218,6 +220,7 @@ export class FlowstaAuth {
     this.user = {
       id: userData.sub || userData.id,
       email: userData.email,
+      username: userData.preferred_username,
       displayName: userData.display_name || userData.name,
       profilePicture: userData.picture || userData.profile_picture,
       agentPubKey: userData.agent_pub_key,

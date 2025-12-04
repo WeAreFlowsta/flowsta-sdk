@@ -1,89 +1,139 @@
 # Flowsta SDK
 
-Official JavaScript SDK for Flowsta Authentication - Censorship-resistant, Single Sign-On authentication for web applications.
+Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based Single Sign-On for web applications.
 
 ## Packages
 
-This monorepo contains:
+### [@flowsta/auth](./packages/auth) ⭐ Recommended
 
-### [@flowsta/auth-sdk](./packages/core)
-
-Core JavaScript/TypeScript SDK for Flowsta authentication.
+**SDK 2.0** - OAuth-only authentication with PKCE. No client secrets needed.
 
 ```bash
-npm install @flowsta/auth-sdk
+npm install @flowsta/auth
 ```
 
 **Features**:
-- Email/password authentication
-- JWT token management
-- State subscription
-- Framework agnostic
+- OAuth 2.0 Authorization Code Flow with PKCE
+- Zero-knowledge architecture
+- No client secrets needed (PKCE provides security)
+- Simple "Sign in with Flowsta" integration
 - TypeScript support
+
+### [@flowsta/login-button](./packages/login-button)
+
+Pre-built "Sign in with Flowsta" button components for multiple frameworks.
+
+```bash
+npm install @flowsta/login-button
+```
+
+**Supports**: React, Vue, Qwik, Vanilla JS
 
 ### [@flowsta/auth-react](./packages/react)
 
 React hooks and components for Flowsta authentication.
 
 ```bash
-npm install @flowsta/auth-sdk @flowsta/auth-react
+npm install @flowsta/auth @flowsta/auth-react
 ```
-
-**Features**:
-- React Context Provider
-- useFlowstaAuth() hook
-- ProtectedRoute component
-- Full TypeScript support
 
 ## Quick Start
 
-### Vanilla JavaScript
+### JavaScript/TypeScript
 
-```javascript
-import { FlowstaAuth } from '@flowsta/auth-sdk';
+```typescript
+import { FlowstaAuth } from '@flowsta/auth';
 
-const flowsta = new FlowstaAuth({
-  domain: 'auth.flowsta.com',
-  clientId: 'your-site-id',
+const auth = new FlowstaAuth({
+  clientId: 'your-client-id',
+  redirectUri: 'https://yoursite.com/auth/callback'
 });
 
-await flowsta.login({ email: 'user@example.com', password: 'password' });
-const user = flowsta.getUser();
+// Redirect to Flowsta login
+auth.login();
+
+// On your callback page
+const user = await auth.handleCallback();
+console.log(user.displayName, user.username);
 ```
 
 ### React
 
 ```jsx
-import { FlowstaAuthProvider, useFlowstaAuth } from '@flowsta/auth-react';
+import { FlowstaAuth } from '@flowsta/auth';
+import { FlowstaLoginButton } from '@flowsta/login-button/react';
 
 function App() {
   return (
-    <FlowstaAuthProvider config={{ domain: 'auth.flowsta.com', clientId: 'your-site-id' }}>
-      <YourApp />
-    </FlowstaAuthProvider>
+    <FlowstaLoginButton
+      clientId="your-client-id"
+      redirectUri="https://yoursite.com/auth/callback"
+      onSuccess={(user) => console.log('Logged in:', user)}
+    />
   );
 }
+```
 
-function Component() {
-  const { user, isAuthenticated } = useFlowstaAuth();
-  // ...
+### Callback Handler
+
+```typescript
+// On your /auth/callback page
+import { FlowstaAuth } from '@flowsta/auth';
+
+const auth = new FlowstaAuth({
+  clientId: 'your-client-id',
+  redirectUri: window.location.origin + '/auth/callback'
+});
+
+// Handle the OAuth callback
+try {
+  const user = await auth.handleCallback();
+  // User is now authenticated
+  // Redirect to your app
+  window.location.href = '/dashboard';
+} catch (error) {
+  console.error('Authentication failed:', error);
+}
+```
+
+## User Data
+
+After authentication, you'll receive a `FlowstaUser` object:
+
+```typescript
+interface FlowstaUser {
+  id: string;           // Unique user ID
+  email?: string;       // Email (if 'email' scope granted)
+  username?: string;    // Username (if set by user)
+  displayName?: string; // Display name
+  profilePicture?: string;
+  agentPubKey?: string; // Holochain agent public key
+  did?: string;         // Decentralized Identifier
 }
 ```
 
 ## What is Flowsta?
 
-Flowsta provides censorship-resistant authentication powered by Holochain:
+Flowsta provides zero-knowledge authentication powered by Holochain:
 
-- 🔐 **Can't Delete Users**: Site owners can block locally, but can't delete global identity
+- 🔐 **Zero-Knowledge**: Your data is encrypted - only you can access it
 - 🌐 **Single Sign-On**: One login works across all Flowsta-enabled sites
-- 🔑 **Distributed Identity**: Built on Holochain's DHT for tamper-proof storage
-- ⚡ **Easy Integration**: Auth0-like developer experience
+- 🔑 **Decentralized Identity**: Built on Holochain's DHT for censorship resistance
+- ⚡ **Easy Integration**: Simple OAuth flow with PKCE security
+
+## Deprecated Packages
+
+The following packages are deprecated and should not be used for new projects:
+
+- `@flowsta/auth-sdk` - Use `@flowsta/auth` instead
+- `@flowsta/auth-client` - Use `@flowsta/auth` instead
 
 ## Documentation
 
-- [Core SDK Documentation](./packages/core/README.md)
+- [SDK 2.0 Documentation](./packages/auth/README.md)
+- [Login Button Documentation](./packages/login-button/README.md)
 - [React Documentation](./packages/react/README.md)
-- [Integration Guide](https://docs.flowsta.com)
+- [Developer Portal](https://dev.flowsta.com)
 
 ## Development
 
@@ -105,7 +155,5 @@ MIT
 ## Links
 
 - [Website](https://flowsta.com)
-- [Documentation](https://docs.flowsta.com)
+- [Developer Portal](https://dev.flowsta.com)
 - [GitHub](https://github.com/WeAreFlowsta/flowsta-sdk)
-- [Issues](https://github.com/WeAreFlowsta/flowsta-sdk/issues)
-
