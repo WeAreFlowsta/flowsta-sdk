@@ -14,9 +14,23 @@ export type ButtonVariant =
   | 'neutral-rectangle';
 
 /**
- * OAuth scopes for Flowsta
+ * OAuth scopes for Flowsta (granular)
+ * - openid: User ID (sub) - auto-included
+ * - email: Email address and verification status
+ * - display_name: User's display name
+ * - username: User's @username
+ * - did: W3C Decentralized Identifier
+ * - public_key: Holochain agent public key
+ * - profile_picture: User's profile picture
  */
-export type FlowstaScope = 'profile' | 'email';
+export type FlowstaScope = 
+  | 'openid'
+  | 'email'
+  | 'display_name'
+  | 'username'
+  | 'did'
+  | 'public_key'
+  | 'profile_picture';
 
 /**
  * Configuration for the Flowsta login button

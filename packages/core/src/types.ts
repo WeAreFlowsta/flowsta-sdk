@@ -2,6 +2,25 @@
  * TypeScript types for Flowsta Auth SDK
  */
 
+/**
+ * Available OAuth scopes (granular)
+ * - openid: User ID (sub) - auto-included
+ * - email: Email address and verification status
+ * - display_name: User's display name
+ * - username: User's @username
+ * - did: W3C Decentralized Identifier
+ * - public_key: Holochain agent public key
+ * - profile_picture: User's profile picture
+ */
+export type FlowstaScope = 
+  | 'openid'
+  | 'email'
+  | 'display_name'
+  | 'username'
+  | 'did'
+  | 'public_key'
+  | 'profile_picture';
+
 export interface FlowstaAuthConfig {
   /** API domain (e.g., 'auth.flowsta.com' or 'http://localhost:8080') */
   domain: string;
@@ -9,7 +28,11 @@ export interface FlowstaAuthConfig {
   clientId: string;
   /** Redirect URI after login */
   redirectUri?: string;
-  /** Scope (reserved for future use) */
+  /** 
+   * Space-separated OAuth scopes to request
+   * Available: openid, email, display_name, username, did, public_key, profile_picture
+   * Example: 'openid display_name email'
+   */
   scope?: string;
 }
 
