@@ -1,0 +1,33 @@
+# Snyk (https://snyk.io) policy file
+# This file documents security decisions and ignores false positives
+version: v1.25.0
+
+ignore:
+  # ===========================================
+  # FALSE POSITIVES - Constants (Not Secrets)
+  # ===========================================
+  
+  # TOKEN_KEY = 'flowsta_auth_token' - localStorage key name, not a secret
+  # USER_KEY = 'flowsta_auth_user' - localStorage key name, not a secret
+  # These are storage key identifiers, not actual credentials or secrets
+  SNYK-JS-HARDCODEDNONCRYTPOSECRET-46b7c801:
+    - '*':
+        reason: 'localStorage key name, not a secret - standard naming for auth token storage'
+        expires: 2026-12-11T00:00:00.000Z
+        created: 2025-12-11T00:00:00.000Z
+
+  # ===========================================
+  # FALSE POSITIVES - DOM XSS (Widget)
+  # ===========================================
+  
+  # RecoveryPhraseWidget - renders user's own recovery phrase
+  # The data comes from our API, not external sources, and is shown to the user
+  # for their own backup purposes. This is intentional functionality.
+  SNYK-JS-DOMXSS-3900f8ff:
+    - '*':
+        reason: 'Widget displays users own recovery phrase from authenticated API - intentional'
+        expires: 2026-12-11T00:00:00.000Z
+        created: 2025-12-11T00:00:00.000Z
+
+patch: {}
+
