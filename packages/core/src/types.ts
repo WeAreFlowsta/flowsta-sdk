@@ -19,7 +19,8 @@ export type FlowstaScope =
   | 'username'
   | 'did'
   | 'public_key'
-  | 'profile_picture';
+  | 'profile_picture'
+  | 'holochain:sign';
 
 export interface FlowstaAuthConfig {
   /** API domain (e.g., 'auth.flowsta.com' or 'http://localhost:8080') */
