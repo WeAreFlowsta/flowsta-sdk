@@ -304,7 +304,7 @@ Flowsta provides **zero-knowledge authentication** powered by Holochain:
 
 ### Developer Resources
 - **[Developer Portal](https://dev.flowsta.com)** - Create apps, manage settings
-- **[Community Discord](https://discord.gg/flowsta)** - Get help, share ideas
+- **[Community Discord](https://discord.gg/p7sfaZTaEc)** - Get help, share ideas
 - **[GitHub Issues](https://github.com/WeAreFlowsta/flowsta-sdk/issues)** - Report bugs
 
 ## 🗑️ Deprecated Packages (SDK 1.0)
@@ -378,4 +378,4 @@ MIT © Flowsta
 
 ---
 
-**Questions?** Join our [Discord community](https://discord.gg/flowsta) or check out the [documentation](https://docs.flowsta.com).
+**Questions?** Join our [Discord community](https://discord.gg/p7sfaZTaEc) or check out the [documentation](https://docs.flowsta.com).
