@@ -2,69 +2,129 @@
 
 Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based Single Sign-On for web applications.
 
-## Packages
+[![npm version](https://img.shields.io/npm/v/@flowsta/auth.svg)](https://www.npmjs.com/package/@flowsta/auth)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-### [@flowsta/auth](./packages/auth) ⭐ Recommended
+> **New to Flowsta?** [Create a developer account](https://dev.flowsta.com) to get your Client ID.
 
-**SDK 2.0** - OAuth-only authentication with PKCE. No client secrets needed.
+## 📦 Packages
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| **[@flowsta/auth](./packages/auth)** ⭐ | `2.0.0` | Core OAuth SDK with React bindings |
+| **[@flowsta/login-button](./packages/login-button)** | `0.1.0` | Pre-built button components |
+| **[@flowsta/holochain](./packages/holochain)** | `1.0.0` | Holochain integration |
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+1. **Get your Client ID**: [Sign up at dev.flowsta.com](https://dev.flowsta.com)
+2. **Add redirect URI**: Configure `https://yoursite.com/auth/callback` in your app settings
+
+### Choose Your Integration Method
+
+#### Option 1: NPM Package (Recommended)
+
+Install the SDK for modern web apps:
 
 ```bash
 npm install @flowsta/auth
 ```
 
-**Features**:
-- OAuth 2.0 Authorization Code Flow with PKCE
-- Zero-knowledge architecture
-- No client secrets needed (PKCE provides security)
-- Simple "Sign in with Flowsta" integration
-- TypeScript support
+#### Option 2: Pre-built Buttons
 
-### [@flowsta/login-button](./packages/login-button)
-
-Pre-built "Sign in with Flowsta" button components for multiple frameworks.
+For quick integration with UI components:
 
 ```bash
 npm install @flowsta/login-button
 ```
 
-**Supports**: React, Vue, Qwik, Vanilla JS
+Supports: **React**, **Vue**, **Qwik**, **Vanilla JS**
+
+#### Option 3: No Build Tools?
+
+Use vanilla JavaScript without npm:
+- 📖 [Complete Vanilla JS Guide](https://docs.flowsta.com/oauth/vanilla-js)
+- 🎨 [Download Button Assets](https://docs.flowsta.com/sdk/buttons)
+
+## Core SDK Features
+
+### [@flowsta/auth](./packages/auth)
+
+OAuth 2.0 authentication with PKCE - no client secrets needed.
+
+**Features**:
+- ✅ OAuth 2.0 + PKCE (Proof Key for Code Exchange)
+- ✅ Zero-knowledge architecture - user data stays encrypted
+- ✅ React bindings included (`@flowsta/auth/react`)
+- ✅ TypeScript-first with full type safety
+- ✅ Zero dependencies - lightweight (< 10kb)
+- ✅ Works in any JavaScript environment
+
+### [@flowsta/login-button](./packages/login-button)
+
+Pre-built "Sign in with Flowsta" button components.
+
+**Features**:
+- ✅ Multiple frameworks: React, Vue, Qwik, Vanilla JS
+- ✅ 6 button variants (dark/light/neutral × pill/rectangle)
+- ✅ Automatic PKCE generation and state management
+- ✅ Customizable styling and behavior
+- ✅ Inline SVG assets - works with any bundler
 
 ### [@flowsta/holochain](./packages/holochain)
 
 Sign Holochain actions using your Flowsta identity.
 
-```bash
-npm install @flowsta/holochain
-```
-
 **Features**:
-- Sign Holochain zome calls with your Flowsta agent key
-- Seamless integration with Flowsta Auth
-- TypeScript support
+- ✅ Sign zome calls with Flowsta agent key
+- ✅ Seamless Holochain integration
+- ✅ TypeScript support
 
-## Quick Start
+## 💡 Quick Start Examples
 
-### JavaScript/TypeScript
+### Vanilla JavaScript (No Build Tools)
 
-```typescript
-import { FlowstaAuth } from '@flowsta/auth';
+Perfect for static HTML sites or simple projects:
 
-const auth = new FlowstaAuth({
-  clientId: 'your-client-id',
-  redirectUri: 'https://yoursite.com/auth/callback'
-});
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login with Flowsta</title>
+</head>
+<body>
+  <a href="#" id="login-btn">
+    <img src="https://docs.flowsta.com/buttons/svg/flowsta_signin_web_dark_pill.svg" 
+         alt="Sign in with Flowsta" 
+         width="175" height="40">
+  </a>
 
-// Redirect to Flowsta login
-auth.login();
+  <script type="module">
+    import { FlowstaAuth } from 'https://unpkg.com/@flowsta/auth';
 
-// On your callback page
-const user = await auth.handleCallback();
-console.log(user.displayName, user.username);
+    const auth = new FlowstaAuth({
+      clientId: 'your-client-id',
+      redirectUri: window.location.origin + '/callback.html'
+    });
+
+    document.getElementById('login-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      auth.login();
+    });
+  </script>
+</body>
+</html>
 ```
 
-### React
+**[View Complete Vanilla JS Guide →](https://docs.flowsta.com/oauth/vanilla-js)**
 
-```jsx
+### React with Hooks
+
+Using the built-in React bindings:
+
+```tsx
 import { FlowstaAuthProvider, useFlowstaAuth } from '@flowsta/auth/react';
 import { FlowstaLoginButton } from '@flowsta/login-button/react';
 
@@ -86,92 +146,236 @@ function Dashboard() {
     return <FlowstaLoginButton onClick={login} variant="dark-pill" />;
   }
   
-  return <div>Welcome, {user.displayName}!</div>;
+  return (
+    <div>
+      <h1>Welcome, {user?.displayName}!</h1>
+      <p>@{user?.username}</p>
+      <button onClick={logout}>Logout</button>
+    </div>
+  );
 }
 ```
 
-### Callback Handler
+### Vue 3 with Composition API
+
+```vue
+<script setup>
+import { FlowstaAuth } from '@flowsta/auth';
+import { FlowstaLoginButtonVue } from '@flowsta/login-button/vue';
+import { ref, onMounted } from 'vue';
+
+const auth = new FlowstaAuth({
+  clientId: 'your-client-id',
+  redirectUri: 'https://yoursite.com/callback'
+});
+
+const user = ref(null);
+const isAuthenticated = ref(false);
+
+onMounted(() => {
+  isAuthenticated.value = auth.isAuthenticated();
+  user.value = auth.getUser();
+});
+
+const login = () => auth.login();
+const logout = () => {
+  auth.logout();
+  isAuthenticated.value = false;
+  user.value = null;
+};
+</script>
+
+<template>
+  <div v-if="!isAuthenticated">
+    <FlowstaLoginButtonVue
+      client-id="your-client-id"
+      redirect-uri="https://yoursite.com/callback"
+      variant="dark-pill"
+    />
+  </div>
+  <div v-else>
+    <h1>Welcome, {{ user?.displayName }}!</h1>
+    <button @click="logout">Logout</button>
+  </div>
+</template>
+```
+
+### Core SDK (TypeScript)
+
+For maximum control and flexibility:
 
 ```typescript
-// On your /auth/callback page
 import { FlowstaAuth } from '@flowsta/auth';
 
 const auth = new FlowstaAuth({
   clientId: 'your-client-id',
-  redirectUri: window.location.origin + '/auth/callback'
+  redirectUri: 'https://yoursite.com/auth/callback',
+  scopes: ['openid', 'email', 'display_name', 'username']
 });
 
-// Handle the OAuth callback
+// Redirect to Flowsta login
+auth.login();
+
+// On your callback page
 try {
   const user = await auth.handleCallback();
-  // User is now authenticated
-  // Redirect to your app
+  console.log('Authenticated:', user.displayName, user.username);
+  // Redirect to dashboard
   window.location.href = '/dashboard';
 } catch (error) {
   console.error('Authentication failed:', error);
+  window.location.href = '/login?error=auth_failed';
 }
 ```
 
-## User Data
+## 🎨 Button Variants
 
-After authentication, you'll receive a `FlowstaUser` object:
+The `@flowsta/login-button` package includes 6 official button styles:
+
+| Variant | Best For | Preview |
+|---------|----------|---------|
+| `dark-pill` | Light backgrounds (recommended) | ![Dark Pill](https://docs.flowsta.com/buttons/svg/flowsta_signin_web_dark_pill.svg) |
+| `dark-rectangle` | Light backgrounds, square style | ![Dark Rectangle](https://docs.flowsta.com/buttons/svg/flowsta_signin_web_dark_rectangle.svg) |
+| `light-pill` | Dark backgrounds | ![Light Pill](https://docs.flowsta.com/buttons/svg/flowsta_signin_web_light_pill.svg) |
+| `light-rectangle` | Dark backgrounds, square style | ![Light Rectangle](https://docs.flowsta.com/buttons/svg/flowsta_signin_web_light_rectangle.svg) |
+| `neutral-pill` | Any background | ![Neutral Pill](https://docs.flowsta.com/buttons/svg/flowsta_signin_web_neutral_pill.svg) |
+| `neutral-rectangle` | Any background, square style | ![Neutral Rectangle](https://docs.flowsta.com/buttons/svg/flowsta_signin_web_neutral_rectangle.svg) |
+
+**[Download all button assets →](https://docs.flowsta.com/sdk/buttons)**
+
+## 👤 User Data & Scopes
+
+After authentication, you'll receive a `FlowstaUser` object with the requested scopes:
 
 ```typescript
 interface FlowstaUser {
-  id: string;           // Unique user ID
-  email?: string;       // Email (if 'email' scope granted)
-  username?: string;    // Username (if set by user)
-  displayName?: string; // Display name
-  profilePicture?: string;
-  agentPubKey?: string; // Holochain agent public key
-  did?: string;         // Decentralized Identifier
+  sub: string;              // Unique user ID (always available)
+  display_name?: string;    // Display name (if 'display_name' scope)
+  username?: string;        // Username (if 'username' scope)
+  email?: string;           // Email (if 'email' scope)
+  email_verified?: boolean; // Email verification status
+  profile_picture?: string; // Profile picture URL (if 'profile_picture' scope)
+  agent_pub_key?: string;   // Holochain agent key (if 'public_key' scope)
+  did?: string;             // Decentralized ID (if 'did' scope)
 }
 ```
 
-## What is Flowsta?
+**Available Scopes:**
+- `openid` - Required, provides user ID
+- `email` - User's email address
+- `display_name` - User's display name
+- `username` - User's @username
+- `profile_picture` - Profile picture URL
+- `public_key` - Holochain agent public key
+- `did` - W3C Decentralized Identifier
 
-Flowsta provides zero-knowledge authentication powered by Holochain:
+## 🔐 What is Flowsta?
 
-- 🔐 **Zero-Knowledge**: Your data is encrypted - only you can access it
-- 🌐 **Single Sign-On**: One login works across all Flowsta-enabled sites
-- 🔑 **Decentralized Identity**: Built on Holochain's DHT for censorship resistance
-- ⚡ **Easy Integration**: Simple OAuth flow with PKCE security
+Flowsta provides **zero-knowledge authentication** powered by Holochain:
 
-## Deprecated Packages (SDK 1.0 - Legacy)
+- **🔐 Zero-Knowledge**: Your data is encrypted end-to-end - only you can decrypt it
+- **🌐 Single Sign-On**: One login works across all Flowsta-enabled applications
+- **🔑 Decentralized Identity**: Built on Holochain's DHT for censorship resistance
+- **⚡ Easy Integration**: Standard OAuth 2.0 with PKCE security
+- **🛡️ Privacy-First**: No tracking, no data mining, no selling your information
 
-The following packages are deprecated and should not be used for new projects:
+### How It Works
 
-- `@flowsta/auth-sdk` (core) - Use `@flowsta/auth` instead
-- `@flowsta/auth-client` (client) - Use `@flowsta/auth` instead
-- `@flowsta/auth-react` (react) - Use `@flowsta/auth/react` instead
-- `@flowsta/auth-widgets` (widgets) - No longer needed in SDK 2.0 (OAuth-only)
+1. **User logs in** via `login.flowsta.com`
+2. **Data is encrypted** with user's password (zero-knowledge)
+3. **Stored on Holochain DHT** (decentralized, censorship-resistant)
+4. **Your app receives** an access token via OAuth
+5. **Fetch user data** from the Auth API (decrypted on-demand)
 
-## Documentation
+## 📚 Documentation
 
-- [SDK 2.0 Documentation](./packages/auth/README.md)
-- [Login Button Documentation](./packages/login-button/README.md)
-- [React Documentation](./packages/react/README.md)
-- [Developer Portal](https://dev.flowsta.com)
+### Official Docs
+- **[Getting Started Guide](https://docs.flowsta.com/getting-started/)** - Complete setup tutorial
+- **[OAuth Quickstart](https://docs.flowsta.com/oauth/quickstart)** - NPM integration guide
+- **[Vanilla JS Guide](https://docs.flowsta.com/oauth/vanilla-js)** - No build tools required
+- **[Button Downloads](https://docs.flowsta.com/sdk/buttons)** - Download button assets
+- **[API Reference](https://docs.flowsta.com/oauth/api-reference)** - Complete API docs
+- **[Security Guide](https://docs.flowsta.com/oauth/security)** - Best practices
 
-## Development
+### Package READMEs
+- [@flowsta/auth](./packages/auth/README.md) - Core SDK documentation
+- [@flowsta/login-button](./packages/login-button/README.md) - Button components
+- [@flowsta/holochain](./packages/holochain/README.md) - Holochain integration
+
+### Developer Resources
+- **[Developer Portal](https://dev.flowsta.com)** - Create apps, manage settings
+- **[Community Discord](https://discord.gg/flowsta)** - Get help, share ideas
+- **[GitHub Issues](https://github.com/WeAreFlowsta/flowsta-sdk/issues)** - Report bugs
+
+## 🗑️ Deprecated Packages (SDK 1.0)
+
+The following packages are from SDK 1.0 and should **not** be used for new projects:
+
+| Package | Status | Replacement |
+|---------|--------|-------------|
+| `@flowsta/auth-sdk` | ⚠️ Deprecated | Use `@flowsta/auth` (v2.0) |
+| `@flowsta/auth-client` | ⚠️ Deprecated | Use `@flowsta/auth` (v2.0) |
+| `@flowsta/auth-react` | ⚠️ Deprecated | Use `@flowsta/auth/react` |
+| `@flowsta/auth-widgets` | ⚠️ Deprecated | Not needed (OAuth-only in v2.0) |
+
+**Why the migration?** SDK 2.0 uses OAuth-only authentication for better security and simpler integration. No more email/password handling in your app!
+
+## 🛠️ Development
+
+### Setup
 
 ```bash
+# Clone the repository
+git clone https://github.com/WeAreFlowsta/flowsta-sdk.git
+cd flowsta-sdk
+
 # Install dependencies
 npm install
 
 # Build all packages
 npm run build
-
-# Watch mode
-npm run dev
 ```
 
-## License
+### Available Scripts
 
-MIT
+```bash
+npm run build       # Build all packages
+npm run dev         # Watch mode for development
+npm run test        # Run tests (coming soon)
+npm run lint        # Lint code (coming soon)
+```
 
-## Links
+### Package Structure
 
-- [Website](https://flowsta.com)
-- [Developer Portal](https://dev.flowsta.com)
-- [GitHub](https://github.com/WeAreFlowsta/flowsta-sdk)
+```
+sdk-monorepo/
+├── packages/
+│   ├── auth/              # Core OAuth SDK (v2.0)
+│   ├── login-button/      # Pre-built button components
+│   ├── holochain/         # Holochain signing integration
+│   ├── core/              # [Deprecated] SDK 1.0 core
+│   ├── client/            # [Deprecated] SDK 1.0 client
+│   ├── react/             # [Deprecated] SDK 1.0 React
+│   └── widgets/           # [Deprecated] SDK 1.0 widgets
+└── README.md
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
+
+## 📄 License
+
+MIT © Flowsta
+
+## 🔗 Links
+
+- **Website**: [flowsta.com](https://flowsta.com)
+- **Documentation**: [docs.flowsta.com](https://docs.flowsta.com)
+- **Developer Portal**: [dev.flowsta.com](https://dev.flowsta.com)
+- **GitHub**: [github.com/WeAreFlowsta/flowsta-sdk](https://github.com/WeAreFlowsta/flowsta-sdk)
+- **npm**: [@flowsta](https://www.npmjs.com/org/flowsta)
+
+---
+
+**Questions?** Join our [Discord community](https://discord.gg/flowsta) or check out the [documentation](https://docs.flowsta.com).
