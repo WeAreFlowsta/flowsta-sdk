@@ -29,13 +29,18 @@ npm install @flowsta/login-button
 
 **Supports**: React, Vue, Qwik, Vanilla JS
 
-### [@flowsta/auth-react](./packages/react)
+### [@flowsta/holochain](./packages/holochain)
 
-React hooks and components for Flowsta authentication.
+Sign Holochain actions using your Flowsta identity.
 
 ```bash
-npm install @flowsta/auth @flowsta/auth-react
+npm install @flowsta/holochain
 ```
+
+**Features**:
+- Sign Holochain zome calls with your Flowsta agent key
+- Seamless integration with Flowsta Auth
+- TypeScript support
 
 ## Quick Start
 
@@ -60,17 +65,28 @@ console.log(user.displayName, user.username);
 ### React
 
 ```jsx
-import { FlowstaAuth } from '@flowsta/auth';
+import { FlowstaAuthProvider, useFlowstaAuth } from '@flowsta/auth/react';
 import { FlowstaLoginButton } from '@flowsta/login-button/react';
 
 function App() {
   return (
-    <FlowstaLoginButton
+    <FlowstaAuthProvider
       clientId="your-client-id"
       redirectUri="https://yoursite.com/auth/callback"
-      onSuccess={(user) => console.log('Logged in:', user)}
-    />
+    >
+      <Dashboard />
+    </FlowstaAuthProvider>
   );
+}
+
+function Dashboard() {
+  const { isAuthenticated, user, login, logout } = useFlowstaAuth();
+  
+  if (!isAuthenticated) {
+    return <FlowstaLoginButton onClick={login} variant="dark-pill" />;
+  }
+  
+  return <div>Welcome, {user.displayName}!</div>;
 }
 ```
 
@@ -121,12 +137,14 @@ Flowsta provides zero-knowledge authentication powered by Holochain:
 - 🔑 **Decentralized Identity**: Built on Holochain's DHT for censorship resistance
 - ⚡ **Easy Integration**: Simple OAuth flow with PKCE security
 
-## Deprecated Packages
+## Deprecated Packages (SDK 1.0 - Legacy)
 
 The following packages are deprecated and should not be used for new projects:
 
-- `@flowsta/auth-sdk` - Use `@flowsta/auth` instead
-- `@flowsta/auth-client` - Use `@flowsta/auth` instead
+- `@flowsta/auth-sdk` (core) - Use `@flowsta/auth` instead
+- `@flowsta/auth-client` (client) - Use `@flowsta/auth` instead
+- `@flowsta/auth-react` (react) - Use `@flowsta/auth/react` instead
+- `@flowsta/auth-widgets` (widgets) - No longer needed in SDK 2.0 (OAuth-only)
 
 ## Documentation
 

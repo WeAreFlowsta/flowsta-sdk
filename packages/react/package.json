@@ -1,7 +1,8 @@
 {
   "name": "@flowsta/auth-react",
   "version": "0.1.0",
-  "description": "React hooks and components for Flowsta Authentication",
+  "description": "[DEPRECATED] Use @flowsta/auth/react instead. React hooks and components for Flowsta Authentication (SDK 1.0 - Legacy)",
+  "deprecated": "This package is deprecated. Please use @flowsta/auth/react from SDK 2.0 instead.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

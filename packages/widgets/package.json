@@ -1,7 +1,8 @@
 {
   "name": "@flowsta/auth-widgets",
   "version": "0.1.0",
-  "description": "Embeddable authentication widgets for Flowsta Auth - recovery phrase, email verification, and account recovery",
+  "description": "[DEPRECATED] SDK 1.0 widgets are no longer supported. Embeddable authentication widgets for Flowsta Auth - recovery phrase, email verification, and account recovery",
+  "deprecated": "This package is deprecated. SDK 2.0 uses OAuth-only authentication and does not require widgets.",
   "author": "Flowsta <hello@flowsta.com>",
   "license": "MIT",
   "main": "dist/index.js",

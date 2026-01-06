@@ -5,6 +5,7 @@
 import React, { useState, useCallback } from 'react';
 import type { FlowstaLoginButtonProps } from './types.js';
 import { buildAuthorizationUrl } from './utils/oauth.js';
+import { getButtonUrl, ButtonTheme, ButtonShape } from './buttonAssets.js';
 
 /**
  * Flowsta Login Button component for React
@@ -28,7 +29,7 @@ import { buildAuthorizationUrl } from './utils/oauth.js';
 export function FlowstaLoginButton({
   clientId,
   redirectUri,
-  scopes = ['profile'],
+  scopes = ['openid', 'email', 'display_name'],
   variant = 'dark-pill',
   loginUrl,
   className = '',
@@ -68,12 +69,9 @@ export function FlowstaLoginButton({
     }
   }, [clientId, redirectUri, scopes, loginUrl, disabled, isLoading, onClick, onError]);
 
-  // Get button image path based on variant
-  const getImagePath = (variant: string): string => {
-    const imageName = `flowsta_signin_web_${variant.replace('-', '_')}`;
-    // For bundled use, assume assets are in the package
-    return `/node_modules/@flowsta/login-button/assets/svg/${imageName}.svg`;
-  };
+  // Parse variant into theme and shape
+  const [theme, shape] = variant.split('-') as [ButtonTheme, ButtonShape];
+  const buttonImageUrl = getButtonUrl(theme, shape);
 
   return (
     <button
@@ -93,7 +91,7 @@ export function FlowstaLoginButton({
     >
       {children || (
         <img
-          src={getImagePath(variant)}
+          src={buttonImageUrl}
           alt="Sign in with Flowsta"
           width={175}
           height={40}

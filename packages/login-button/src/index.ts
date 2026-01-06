@@ -14,6 +14,9 @@ export * from './utils/oauth.js';
 // Export types
 export * from './types.js';
 
+// Export button assets
+export * from './buttonAssets.js';
+
 // Re-export for convenience
 export { buildAuthorizationUrl, handleCallback, parseCallbackUrl } from './utils/oauth.js';
 export { generatePKCEPair, generateCodeVerifier, generateCodeChallenge } from './utils/pkce.js';
