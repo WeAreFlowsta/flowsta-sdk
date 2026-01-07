@@ -1,0 +1,106 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to publish'
+        required: true
+        type: choice
+        options:
+          - auth
+          - login-button
+          - holochain
+          - all
+      version-bump:
+        description: 'Version bump type'
+        required: false
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
+        default: none
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Required for npm provenance
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Build packages
+        run: |
+          if [ "${{ github.event.inputs.package }}" = "all" ]; then
+            echo "Building all packages..."
+            cd packages/auth && npm run build && cd ../..
+            cd packages/login-button && npm run build && cd ../..
+            cd packages/holochain && npm run build && cd ../..
+          else
+            echo "Building ${{ github.event.inputs.package }}..."
+            cd packages/${{ github.event.inputs.package }}
+            npm run build
+            cd ../..
+          fi
+      
+      - name: Version bump (if requested)
+        if: github.event.inputs.version-bump != 'none'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          if [ "${{ github.event.inputs.package }}" = "all" ]; then
+            cd packages/auth && npm version ${{ github.event.inputs.version-bump }} && cd ../..
+            cd packages/login-button && npm version ${{ github.event.inputs.version-bump }} && cd ../..
+            cd packages/holochain && npm version ${{ github.event.inputs.version-bump }} && cd ../..
+          else
+            cd packages/${{ github.event.inputs.package }}
+            npm version ${{ github.event.inputs.version-bump }}
+            cd ../..
+          fi
+          
+          git push --follow-tags
+      
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.package }}" = "all" ]; then
+            echo "Publishing all packages..."
+            cd packages/auth && npm publish --provenance --access public && cd ../..
+            cd packages/login-button && npm publish --provenance --access public && cd ../..
+            cd packages/holochain && npm publish --provenance --access public && cd ../..
+          else
+            echo "Publishing ${{ github.event.inputs.package }}..."
+            cd packages/${{ github.event.inputs.package }}
+            npm publish --provenance --access public
+            cd ../..
+          fi
+      
+      - name: Create GitHub Release
+        if: github.event.inputs.version-bump != 'none'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.package }}-v${{ steps.version.outputs.version }}
+          release_name: Release ${{ github.event.inputs.package }} v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+
