@@ -32,6 +32,11 @@
   ],
   "author": "Flowsta",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git",
+    "directory": "packages/holochain"
+  },
   "peerDependencies": {
     "@flowsta/auth": ">=2.0.0"
   },
