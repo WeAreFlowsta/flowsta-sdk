@@ -1,6 +1,6 @@
 {
   "name": "@flowsta/login-button",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Login with Flowsta button components for React, Vue, Qwik, and vanilla JavaScript",
   "type": "module",
   "main": "./dist/index.js",
@@ -58,9 +58,9 @@
     "directory": "packages/login-button"
   },
   "peerDependencies": {
+    "@builder.io/qwik": "^1.0.0",
     "react": "^18.0.0 || ^19.0.0",
-    "vue": "^3.0.0",
-    "@builder.io/qwik": "^1.0.0"
+    "vue": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
@@ -79,10 +79,13 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "react": "^18.3.1",
     "typescript": "^5.5.4",
-    "vite": "^5.4.2",
+    "vite": "^7.3.1",
     "vue": "^3.4.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "happy-dom": "20.5.0"
   }
 }

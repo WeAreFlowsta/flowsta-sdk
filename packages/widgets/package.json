@@ -65,18 +65,16 @@
     "@types/node": "^20.10.5",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
-    "@vitest/coverage-v8": "^1.0.4",
+    "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^8.56.0",
-    "happy-dom": "^12.10.3",
+    "happy-dom": "^20.5.0",
     "typescript": "^5.3.3",
-    "vite": "^5.0.8",
-    "vite-plugin-dts": "^3.7.0",
-    "vitest": "^1.0.4"
+    "vite": "^7.3.1",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^4.0.18"
   },
-  "peerDependencies": {},
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
   }
 }
-

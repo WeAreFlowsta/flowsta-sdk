@@ -36,15 +36,15 @@
     "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git",
     "directory": "packages/client"
   },
-  "dependencies": {},
+  "dependencies": {
+    "happy-dom": "20.5.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.5.4",
-    "vite": "^5.4.2"
+    "vite": "^7.3.1"
   },
-  "peerDependencies": {},
   "engines": {
     "node": ">=18.0.0"
   }
 }
-
