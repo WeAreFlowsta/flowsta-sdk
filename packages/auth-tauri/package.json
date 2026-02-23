@@ -1,7 +1,7 @@
 {
-  "name": "@flowsta/holochain",
-  "version": "1.1.0",
-  "description": "Flowsta Holochain SDK - Sign Holochain actions using your Flowsta identity. Supports remote (API) and local (Vault IPC) signing.",
+  "name": "@flowsta/auth-tauri",
+  "version": "0.1.0",
+  "description": "Flowsta Auth plugin for Tauri v2 desktop apps using Flowsta Vault",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -17,36 +17,29 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
-    "test": "vitest",
-    "lint": "eslint src"
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch"
   },
   "keywords": [
     "flowsta",
+    "tauri",
+    "desktop",
+    "vault",
+    "identity",
     "holochain",
-    "signing",
-    "agent",
-    "web3",
-    "decentralized",
-    "identity"
+    "decentralized"
   ],
   "author": "Flowsta",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git",
-    "directory": "packages/holochain"
+    "directory": "packages/auth-tauri"
   },
   "peerDependencies": {
-    "@flowsta/auth": ">=2.0.0"
+    "@tauri-apps/api": ">=2.0.0"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
-    "typescript": "^5.3.0",
-    "vitest": "^4.0.18"
-  },
-  "dependencies": {
-    "happy-dom": "20.5.0",
-    "vite": "7.3.1"
+    "typescript": "^5.3.0"
   }
 }

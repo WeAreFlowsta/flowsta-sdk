@@ -1,7 +1,7 @@
 {
   "name": "@flowsta/auth",
-  "version": "2.0.0",
-  "description": "Flowsta Auth SDK 2.0 - OAuth-only authentication for web applications",
+  "version": "2.1.0",
+  "description": "Flowsta Auth SDK - OAuth authentication with Vault detection and agent linking",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
