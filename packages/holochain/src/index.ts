@@ -548,4 +548,331 @@ export function createHolochainClient(
   });
 }
 
+// ── Agent Linking — Flowsta Vault Identity Provider ────────────────
+//
+// Standalone functions for third-party Holochain developers to link
+// their app's agent key with the user's Flowsta Vault identity.
+//
+// The developer adds the `flowsta-agent-linking` Rust crate to their
+// DNA, then uses these functions to get a signed attestation from the
+// Vault via IPC.
+
+export class VaultNotFoundError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'Flowsta Vault is not running. The user must open Flowsta Vault.',
+      'vault_not_found',
+    );
+    this.name = 'VaultNotFoundError';
+  }
+}
+
+export class VaultLockedError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'Flowsta Vault is locked. The user must unlock it first.',
+      'vault_locked',
+    );
+    this.name = 'VaultLockedError';
+  }
+}
+
+export class UserDeniedError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'User denied the identity link request.',
+      'user_denied',
+    );
+    this.name = 'UserDeniedError';
+  }
+}
+
+export interface LinkFlowstaIdentityOptions {
+  /** Human-readable app name shown in Vault approval dialog */
+  appName: string;
+  /** The third-party agent's public key in uhCAk... format */
+  localAgentPubKey: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+}
+
+export interface LinkFlowstaIdentityResult {
+  success: boolean;
+  payload: {
+    /** Vault's agent public key in uhCAk... format */
+    vaultAgentPubKey: string;
+    /** Base64 standard encoded Ed25519 signature (64 bytes) */
+    vaultSignature: string;
+  };
+}
+
+/**
+ * Request an agent-linking signature from Flowsta Vault.
+ *
+ * This is the main function for third-party Holochain developers to link
+ * their app's agent key with the user's Flowsta identity. The Vault shows
+ * an approval dialog, computes the sorted key pair payload, and signs it.
+ *
+ * After receiving the result, pass it to your zome's `create_external_link`:
+ *
+ * @example
+ * ```typescript
+ * import { linkFlowstaIdentity } from '@flowsta/holochain';
+ *
+ * const result = await linkFlowstaIdentity({
+ *   appName: 'ChessChain',
+ *   localAgentPubKey: myAgentKey,  // uhCAk... format
+ * });
+ *
+ * // Call your own zome
+ * await appWebsocket.callZome({
+ *   role_name: 'chess',
+ *   zome_name: 'agent_linking',
+ *   fn_name: 'create_external_link',
+ *   payload: {
+ *     external_agent: decodeHashFromBase64(result.payload.vaultAgentPubKey),
+ *     external_signature: base64ToSignature(result.payload.vaultSignature),
+ *   },
+ * });
+ * ```
+ *
+ * @throws {VaultNotFoundError} Vault is not running or unreachable
+ * @throws {VaultLockedError} Vault is locked
+ * @throws {UserDeniedError} User rejected the approval dialog
+ * @throws {FlowstaHolochainError} Other errors (timeout, invalid key, etc.)
+ */
+export async function linkFlowstaIdentity(
+  options: LinkFlowstaIdentityOptions,
+): Promise<LinkFlowstaIdentityResult> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  // Step 1: Check Vault is running and unlocked
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    const statusResponse = await fetch(`${ipcUrl}/status`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!statusResponse.ok) {
+      throw new VaultNotFoundError();
+    }
+
+    const status = await statusResponse.json();
+    if (!status.unlocked) {
+      throw new VaultLockedError();
+    }
+  } catch (err) {
+    if (err instanceof FlowstaHolochainError) throw err;
+    throw new VaultNotFoundError();
+  }
+
+  // Step 2: Request identity link signature
+  const response = await fetch(`${ipcUrl}/link-identity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      app_name: options.appName,
+      app_agent_pub_key: options.localAgentPubKey,
+    }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const error = data.error || 'unknown_error';
+
+    if (error === 'vault_locked') throw new VaultLockedError();
+    if (error === 'user_denied') throw new UserDeniedError();
+
+    throw new FlowstaHolochainError(
+      data.description || `Identity link failed: ${error}`,
+      error,
+      data.description,
+    );
+  }
+
+  const data = await response.json();
+
+  return {
+    success: true,
+    payload: {
+      vaultAgentPubKey: data.vault_agent_pub_key,
+      vaultSignature: data.vault_signature,
+    },
+  };
+}
+
+export interface GetFlowstaIdentityOptions {
+  /** @holochain/client AppWebsocket instance */
+  appWebsocket: {
+    callZome(args: {
+      role_name: string;
+      zome_name: string;
+      fn_name: string;
+      payload: unknown;
+    }): Promise<unknown>;
+  };
+  /** DNA role name in the hApp manifest */
+  roleName: string;
+  /** Zome name. Default: 'agent_linking' */
+  zomeName?: string;
+  /** Agent public key to query (raw bytes, e.g. from @holochain/client) */
+  agentPubKey: Uint8Array;
+}
+
+/**
+ * Query linked Flowsta identities for an agent on your DHT.
+ *
+ * Calls the `get_linked_agents` function on the agent-linking coordinator zome.
+ * Returns an array of linked agent public keys (as raw bytes).
+ *
+ * @example
+ * ```typescript
+ * const linked = await getFlowstaIdentity({
+ *   appWebsocket,
+ *   roleName: 'chess',
+ *   agentPubKey: myAgentKey,
+ * });
+ * console.log(`Linked to ${linked.length} Flowsta identities`);
+ * ```
+ */
+export async function getFlowstaIdentity(
+  options: GetFlowstaIdentityOptions,
+): Promise<Uint8Array[]> {
+  const zomeName = options.zomeName || 'agent_linking';
+
+  const result = await options.appWebsocket.callZome({
+    role_name: options.roleName,
+    zome_name: zomeName,
+    fn_name: 'get_linked_agents',
+    payload: options.agentPubKey,
+  });
+
+  return result as Uint8Array[];
+}
+
+// ── Revoke / Status — Flowsta Vault Identity ──────────────────────
+
+export interface RevokeFlowstaIdentityOptions {
+  /** Human-readable app name */
+  appName: string;
+  /** The third-party agent's public key in uhCAk... format */
+  localAgentPubKey: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+}
+
+/**
+ * Notify Flowsta Vault that an identity link was revoked.
+ *
+ * Best-effort — if Vault is not running, returns `{ success: false }`
+ * without throwing. The DHT revocation (calling `revoke_link` on your
+ * zome) is what matters; this is just a courtesy notification so Vault
+ * can update its UI immediately.
+ *
+ * @example
+ * ```typescript
+ * import { revokeFlowstaIdentity } from '@flowsta/holochain';
+ *
+ * // After calling revoke_link on your zome:
+ * await revokeFlowstaIdentity({
+ *   appName: 'ProofPoll',
+ *   localAgentPubKey: myAgentKey,
+ * });
+ * ```
+ */
+export async function revokeFlowstaIdentity(
+  options: RevokeFlowstaIdentityOptions,
+): Promise<{ success: boolean }> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    const response = await fetch(`${ipcUrl}/revoke-identity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        app_name: options.appName,
+        app_agent_pub_key: options.localAgentPubKey,
+      }),
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return { success: false };
+    }
+
+    const data = await response.json();
+    return { success: !!data.success };
+  } catch {
+    // Vault not running or unreachable — not an error
+    return { success: false };
+  }
+}
+
+export interface CheckFlowstaLinkStatusOptions {
+  /** The third-party agent's public key in uhCAk... format */
+  localAgentPubKey: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+}
+
+/**
+ * Check if Flowsta Vault still considers this agent linked.
+ *
+ * Used to detect vault-side revocation. If the user revoked from Vault's UI,
+ * this will return `{ linked: false }` so the third-party app can clean up
+ * its DHT entry.
+ *
+ * Returns `{ linked: false }` if Vault is not running (can't determine).
+ *
+ * @example
+ * ```typescript
+ * import { checkFlowstaLinkStatus } from '@flowsta/holochain';
+ *
+ * const status = await checkFlowstaLinkStatus({
+ *   localAgentPubKey: myAgentKey,
+ * });
+ *
+ * if (!status.linked) {
+ *   // Vault revoked — clean up DHT entry
+ *   await appWebsocket.callZome({ ... fn_name: 'revoke_link', ... });
+ * }
+ * ```
+ */
+export async function checkFlowstaLinkStatus(
+  options: CheckFlowstaLinkStatusOptions,
+): Promise<{ linked: boolean; appName?: string }> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    const response = await fetch(
+      `${ipcUrl}/link-status?app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}`,
+      { signal: controller.signal },
+    );
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return { linked: false };
+    }
+
+    const data = await response.json();
+    return {
+      linked: !!data.linked,
+      appName: data.app_name,
+    };
+  } catch {
+    // Vault not running — can't determine
+    return { linked: false };
+  }
+}
+
 export default FlowstaHolochain;

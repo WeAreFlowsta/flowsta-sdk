@@ -1,6 +1,6 @@
 {
   "name": "@flowsta/holochain",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Flowsta Holochain SDK - Sign Holochain actions using your Flowsta identity. Supports remote (API) and local (Vault IPC) signing.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
