@@ -587,9 +587,41 @@ export class UserDeniedError extends FlowstaHolochainError {
   }
 }
 
+export class InvalidClientIdError extends FlowstaHolochainError {
+  constructor(message?: string) {
+    super(
+      message || 'Invalid client_id. Register your app at dev.flowsta.com',
+      'invalid_client_id',
+    );
+    this.name = 'InvalidClientIdError';
+  }
+}
+
+export class MissingClientIdError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'client_id is required. Register your app at dev.flowsta.com to get one.',
+      'missing_client_id',
+    );
+    this.name = 'MissingClientIdError';
+  }
+}
+
+export class ApiUnreachableError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'Could not verify app with Flowsta. Check internet connection.',
+      'api_unreachable',
+    );
+    this.name = 'ApiUnreachableError';
+  }
+}
+
 export interface LinkFlowstaIdentityOptions {
   /** Human-readable app name shown in Vault approval dialog */
   appName: string;
+  /** Developer client_id from dev.flowsta.com (required for MAU tracking) */
+  clientId: string;
   /** The third-party agent's public key in uhCAk... format */
   localAgentPubKey: string;
   /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
@@ -621,6 +653,7 @@ export interface LinkFlowstaIdentityResult {
  *
  * const result = await linkFlowstaIdentity({
  *   appName: 'ChessChain',
+ *   clientId: 'flowsta_app_abc123...',  // from dev.flowsta.com
  *   localAgentPubKey: myAgentKey,  // uhCAk... format
  * });
  *
@@ -639,6 +672,9 @@ export interface LinkFlowstaIdentityResult {
  * @throws {VaultNotFoundError} Vault is not running or unreachable
  * @throws {VaultLockedError} Vault is locked
  * @throws {UserDeniedError} User rejected the approval dialog
+ * @throws {InvalidClientIdError} client_id not registered at dev.flowsta.com
+ * @throws {MissingClientIdError} client_id not provided
+ * @throws {ApiUnreachableError} Cannot reach Flowsta API to verify app (first link requires internet)
  * @throws {FlowstaHolochainError} Other errors (timeout, invalid key, etc.)
  */
 export async function linkFlowstaIdentity(
@@ -675,6 +711,7 @@ export async function linkFlowstaIdentity(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       app_name: options.appName,
+      client_id: options.clientId,
       app_agent_pub_key: options.localAgentPubKey,
     }),
   });
@@ -685,6 +722,9 @@ export async function linkFlowstaIdentity(
 
     if (error === 'vault_locked') throw new VaultLockedError();
     if (error === 'user_denied') throw new UserDeniedError();
+    if (error === 'invalid_client_id' || error === 'app_not_found' || error === 'app_disabled') throw new InvalidClientIdError(data.description);
+    if (error === 'missing_client_id') throw new MissingClientIdError();
+    if (error === 'api_unreachable') throw new ApiUnreachableError();
 
     throw new FlowstaHolochainError(
       data.description || `Identity link failed: ${error}`,
