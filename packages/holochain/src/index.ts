@@ -106,6 +106,71 @@ export class ApiUnreachableError extends FlowstaHolochainError {
   }
 }
 
+// ── Backup Types ──────────────────────────────────────────────────
+
+export interface FlowstaBackupOptions {
+  /** Developer client_id from dev.flowsta.com */
+  clientId: string;
+  /** Human-readable app name */
+  appName: string;
+  /** Optional label for versioned backups (default: "latest") */
+  label?: string;
+  /** MIME type hint (default: "application/json") */
+  contentType?: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+}
+
+export interface FlowstaBackupResult {
+  success: boolean;
+  label: string;
+  dataSize: number;
+  createdAt: number;
+}
+
+export interface FlowstaBackupRetrieveOptions {
+  /** Developer client_id */
+  clientId: string;
+  /** Backup label to retrieve (default: "latest") */
+  label?: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+}
+
+export interface FlowstaBackupEntry {
+  clientId: string;
+  appName: string;
+  backupCount: number;
+  totalSize: number;
+  lastBackupAt: number;
+}
+
+export interface FlowstaBackupStats {
+  appCount: number;
+  totalBackups: number;
+  totalSize: number;
+  apps: FlowstaBackupEntry[];
+}
+
+export interface FlowstaAutoBackupConfig {
+  /** Developer client_id from dev.flowsta.com */
+  clientId: string;
+  /** Human-readable app name */
+  appName: string;
+  /** Function that returns the data to back up */
+  getData: () => unknown | Promise<unknown>;
+  /** Backup interval in minutes (default: 60). Set to 0 for manual only. */
+  intervalMinutes?: number;
+  /** Optional label (default: "latest" — overwrites each time) */
+  label?: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+  /** Called when backup succeeds */
+  onSuccess?: (result: FlowstaBackupResult) => void;
+  /** Called when backup fails */
+  onError?: (error: Error) => void;
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface LinkFlowstaIdentityOptions {
@@ -442,4 +507,245 @@ export async function checkFlowstaLinkStatus(
   } catch {
     return { linked: false };
   }
+}
+
+// ── Backup Functions ──────────────────────────────────────────────
+
+/**
+ * Back up data to the user's Flowsta Vault.
+ *
+ * The vault encrypts the data at rest using AES-256-GCM. The user can
+ * view, export, or delete backups from the Vault's "Your Data" page.
+ *
+ * @example
+ * ```typescript
+ * import { backupToVault } from '@flowsta/holochain';
+ *
+ * const myData = await getMyAppData();
+ * const result = await backupToVault({
+ *   clientId: 'flowsta_app_abc123...',
+ *   appName: 'ProofPoll',
+ * }, myData);
+ *
+ * console.log(`Backed up ${result.dataSize} bytes`);
+ * ```
+ *
+ * @throws {VaultNotFoundError} Vault is not running
+ * @throws {VaultLockedError} Vault is locked
+ * @throws {FlowstaHolochainError} Backup failed (e.g. too large, too many backups)
+ */
+export async function backupToVault(
+  options: FlowstaBackupOptions,
+  data: unknown,
+): Promise<FlowstaBackupResult> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  let response: Response;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    response = await fetch(`${ipcUrl}/backup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        client_id: options.clientId,
+        app_name: options.appName,
+        label: options.label,
+        data,
+        content_type: options.contentType,
+      }),
+    });
+    clearTimeout(timeout);
+  } catch {
+    throw new VaultNotFoundError();
+  }
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (err.error === 'vault_locked') throw new VaultLockedError();
+    throw new FlowstaHolochainError(
+      err.description || 'Backup failed',
+      err.error || 'backup_failed',
+      err.description,
+    );
+  }
+
+  const result = await response.json();
+  return {
+    success: true,
+    label: result.label,
+    dataSize: result.data_size,
+    createdAt: result.created_at,
+  };
+}
+
+/**
+ * Retrieve a backup from the user's Flowsta Vault.
+ *
+ * @example
+ * ```typescript
+ * import { retrieveFromVault } from '@flowsta/holochain';
+ *
+ * const backup = await retrieveFromVault({
+ *   clientId: 'flowsta_app_abc123...',
+ * });
+ *
+ * if (backup) {
+ *   await importData(backup.data);
+ * }
+ * ```
+ *
+ * @returns The backup data and metadata, or null if no backup exists
+ */
+export async function retrieveFromVault(
+  options: FlowstaBackupRetrieveOptions,
+): Promise<{ data: unknown; label?: string; createdAt: number; dataSize: number } | null> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  let response: Response;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    response = await fetch(`${ipcUrl}/backup/retrieve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        client_id: options.clientId,
+        label: options.label,
+      }),
+    });
+    clearTimeout(timeout);
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const result = await response.json();
+  return {
+    data: result.data,
+    label: result.label,
+    createdAt: result.created_at,
+    dataSize: result.data_size,
+  };
+}
+
+/**
+ * List all backups stored in the user's Flowsta Vault.
+ *
+ * @returns Backup stats for all apps, or empty stats if vault is unavailable
+ */
+export async function listVaultBackups(
+  ipcUrl = 'http://127.0.0.1:27777',
+): Promise<FlowstaBackupStats> {
+  const empty: FlowstaBackupStats = { appCount: 0, totalBackups: 0, totalSize: 0, apps: [] };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(`${ipcUrl}/backup/list`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) return empty;
+
+    const data = await response.json();
+    return {
+      appCount: data.app_count,
+      totalBackups: data.total_backups,
+      totalSize: data.total_size,
+      apps: (data.apps || []).map((a: Record<string, unknown>) => ({
+        clientId: a.client_id,
+        appName: a.app_name,
+        backupCount: a.backup_count,
+        totalSize: a.total_size,
+        lastBackupAt: a.last_backup_at,
+      })),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Set up automatic backups to Flowsta Vault.
+ *
+ * Calls your `getData()` function on a schedule and backs up the result
+ * to the vault. Returns a `stop()` function to cancel the auto-backup.
+ *
+ * @example
+ * ```typescript
+ * import { startAutoBackup } from '@flowsta/holochain';
+ *
+ * const stop = startAutoBackup({
+ *   clientId: 'flowsta_app_abc123...',
+ *   appName: 'ProofPoll',
+ *   intervalMinutes: 30,
+ *   getData: () => myApp.exportAllData(),
+ *   onSuccess: (r) => console.log(`Backed up ${r.dataSize} bytes`),
+ *   onError: (e) => console.warn('Backup failed:', e.message),
+ * });
+ *
+ * // Later, to stop:
+ * stop();
+ * ```
+ *
+ * @returns A function that stops the auto-backup when called
+ */
+export function startAutoBackup(
+  config: FlowstaAutoBackupConfig,
+): () => void {
+  const intervalMs = (config.intervalMinutes ?? 60) * 60 * 1000;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let stopped = false;
+
+  const doBackup = async () => {
+    if (stopped) return;
+
+    try {
+      // Check vault is available first
+      const status = await getVaultStatus(config.ipcUrl);
+      if (!status.running || !status.unlocked) return;
+
+      const data = await config.getData();
+
+      const result = await backupToVault(
+        {
+          clientId: config.clientId,
+          appName: config.appName,
+          label: config.label,
+          ipcUrl: config.ipcUrl,
+        },
+        data,
+      );
+
+      config.onSuccess?.(result);
+    } catch (err) {
+      config.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  // Run first backup immediately
+  doBackup();
+
+  // Schedule recurring backups
+  if (intervalMs > 0) {
+    timer = setInterval(doBackup, intervalMs);
+  }
+
+  return () => {
+    stopped = true;
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
 }
