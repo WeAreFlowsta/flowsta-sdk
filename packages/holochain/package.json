@@ -1,7 +1,7 @@
 {
   "name": "@flowsta/holochain",
-  "version": "1.2.0",
-  "description": "Flowsta Holochain SDK - Sign Holochain actions using your Flowsta identity. Supports remote (API) and local (Vault IPC) signing.",
+  "version": "2.0.0",
+  "description": "Flowsta Holochain SDK - Link your Holochain app's agent key with the user's Flowsta Vault identity.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -24,11 +24,10 @@
   "keywords": [
     "flowsta",
     "holochain",
-    "signing",
-    "agent",
+    "agent-linking",
+    "identity",
     "web3",
-    "decentralized",
-    "identity"
+    "decentralized"
   ],
   "author": "Flowsta",
   "license": "MIT",
@@ -37,10 +36,7 @@
     "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git",
     "directory": "packages/holochain"
   },
-  "peerDependencies": {
-    "@flowsta/auth": ">=2.0.0"
-  },
-  "devDependencies": {
+"devDependencies": {
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",
     "vitest": "^4.0.18"

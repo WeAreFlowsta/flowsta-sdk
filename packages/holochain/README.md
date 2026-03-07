@@ -1,232 +1,158 @@
 # @flowsta/holochain
 
-Flowsta Holochain SDK - Sign Holochain actions using your Flowsta identity.
+Link your Holochain app's agent key with the user's Flowsta Vault identity.
 
 ## Overview
 
-This SDK enables Holochain applications to leverage Flowsta's identity system for signing actions. Users authenticate with Flowsta and grant your application permission to sign Holochain actions on their behalf.
+Flowsta Vault acts as a local identity provider (like MetaMask for Ethereum) for Holochain apps. This SDK lets you request a signed identity attestation from the Vault via IPC, then commit it to your own DHT using the `flowsta-agent-linking` Rust crate.
 
-**Key Features:**
-- Sign Holochain actions with Flowsta-managed agent keys
-- Sign raw bytes for custom Holochain operations
-- Manage signing permissions
-- Works alongside `@flowsta/auth` for authentication
+**No shared DNA or API dependency required.** Anyone on your DHT can verify the user's Flowsta identity purely via Ed25519 cryptography.
 
 ## Installation
 
 ```bash
-npm install @flowsta/auth @flowsta/holochain
+npm install @flowsta/holochain
 ```
+
+You also need the `flowsta-agent-linking` Rust crate in your DNA. See [Integration Guide](#integration-guide) below.
 
 ## Quick Start
 
 ```typescript
-import { FlowstaAuth } from '@flowsta/auth';
-import { FlowstaHolochain, createHolochainClient } from '@flowsta/holochain';
+import { linkFlowstaIdentity } from '@flowsta/holochain';
 
-// 1. Setup authentication with holochain:sign scope
-const auth = new FlowstaAuth({
-  clientId: 'your-client-id',
-  redirectUri: 'https://yoursite.com/callback',
-  scopes: ['openid', 'public_key', 'holochain:sign']
+// 1. Request identity link from Vault
+const result = await linkFlowstaIdentity({
+  appName: 'ChessChain',
+  clientId: 'flowsta_app_abc123...', // from dev.flowsta.com
+  localAgentPubKey: myAgentKey,      // uhCAk... format
 });
 
-// 2. Create Holochain client
-const holochain = createHolochainClient(auth);
-
-// 3. After user authenticates, sign actions
-async function createHolochainEntry() {
-  try {
-    const result = await holochain.signAction({
-      action: {
-        type: 'CreateEntry',
-        entry_type: 'message',
-        payload: { content: 'Hello, Holochain!' }
-      },
-      reason: 'Creating a new message'
-    });
-    
-    console.log('Signed action:', result.signedAction);
-    console.log('Signature:', result.signature);
-    console.log('Agent public key:', result.agentPubKey);
-  } catch (error) {
-    if (error instanceof ConsentRequired) {
-      // User needs to grant permission - redirect to OAuth
-      auth.login();
-    }
-  }
-}
+// 2. Commit attestation to your DHT
+await appWebsocket.callZome({
+  role_name: 'chess',
+  zome_name: 'agent_linking',
+  fn_name: 'create_external_link',
+  payload: {
+    external_agent: decodeHashFromBase64(result.payload.vaultAgentPubKey),
+    external_signature: base64ToSignature(result.payload.vaultSignature),
+  },
+});
 ```
 
 ## API Reference
 
-### `FlowstaHolochain`
+### `linkFlowstaIdentity(options)`
 
-Main class for Holochain signing operations.
+Request an agent-linking signature from Flowsta Vault. Shows an approval dialog to the user.
 
-#### Constructor
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `appName` | `string` | Yes | Shown in Vault approval dialog |
+| `clientId` | `string` | Yes | From dev.flowsta.com |
+| `localAgentPubKey` | `string` | Yes | Your agent's pubkey (`uhCAk...` format) |
+| `ipcUrl` | `string` | No | Default: `http://127.0.0.1:27777` |
+
+Returns `{ success: true, payload: { vaultAgentPubKey, vaultSignature } }`.
+
+### `getFlowstaIdentity(options)`
+
+Query linked Flowsta identities for an agent on your DHT.
 
 ```typescript
-const holochain = new FlowstaHolochain({
-  // Access token - can be a string or a function that returns the token
-  accessToken: auth.getAccessToken.bind(auth),
-  // Optional: Custom API URL (defaults to production)
-  apiUrl: 'https://auth-api.flowsta.com'
+const linked = await getFlowstaIdentity({
+  appWebsocket,
+  roleName: 'chess',
+  agentPubKey: myAgentKey, // Uint8Array
 });
 ```
 
-#### `signAction(request)`
+### `getVaultStatus(ipcUrl?)`
 
-Sign a Holochain action.
-
-```typescript
-const result = await holochain.signAction({
-  action: {
-    type: 'CreateEntry',
-    entry_type: 'post',
-    payload: { title: 'Hello', content: 'World' }
-  },
-  reason: 'Creating a new blog post' // Optional, shown in audit log
-});
-
-// Returns:
-// {
-//   success: true,
-//   signedAction: { ... },
-//   signature: 'base64-signature',
-//   agentPubKey: 'uhCAk...',
-//   did: 'did:holo:uhCAk...',
-//   signedAt: '2025-01-15T10:30:00Z'
-// }
-```
-
-#### `signBytes(request)`
-
-Sign raw bytes for custom operations.
+Check if Flowsta Vault is running and unlocked.
 
 ```typescript
-const bytesToSign = btoa(JSON.stringify(myData));
-const result = await holochain.signBytes({
-  bytes: bytesToSign,
-  reason: 'Signing custom data'
-});
-
-// Returns:
-// {
-//   success: true,
-//   signature: 'base64-signature',
-//   agentPubKey: 'uhCAk...'
-// }
-```
-
-#### `getPermissions()`
-
-Get all apps the user has granted signing permission to.
-
-```typescript
-const permissions = await holochain.getPermissions();
-
-// Returns array of:
-// {
-//   id: 'uuid',
-//   appId: 'uuid',
-//   appName: 'My Holochain App',
-//   appLogo: 'https://...',
-//   scopes: ['holochain:sign'],
-//   grantedAt: '2025-01-15T10:00:00Z',
-//   lastUsedAt: '2025-01-15T10:30:00Z',
-//   signCount: 42
-// }
-```
-
-#### `revokePermission(appId)`
-
-Revoke signing permission for an app.
-
-```typescript
-const revoked = await holochain.revokePermission('app-uuid');
-console.log('Permission revoked:', revoked);
-```
-
-#### `hasSigningPermission()`
-
-Check if the user has granted signing permission.
-
-```typescript
-const hasPermission = await holochain.hasSigningPermission();
-if (!hasPermission) {
-  // Prompt user to grant permission
+const status = await getVaultStatus();
+if (!status.running) {
+  // Prompt user to open Flowsta Vault
 }
 ```
 
-### Helper Functions
+### `revokeFlowstaIdentity(options)`
 
-#### `createHolochainClient(auth, options?)`
+Notify Vault that a link was revoked (best-effort, won't throw if Vault is offline).
 
-Convenience function to create a Holochain client from a FlowstaAuth instance.
+### `checkFlowstaLinkStatus(options)`
 
-```typescript
-import { createHolochainClient } from '@flowsta/holochain';
-
-const holochain = createHolochainClient(auth, {
-  apiUrl: 'https://auth-api.flowsta.com' // optional
-});
-```
+Check if Vault still considers an agent linked (detects vault-side revocation).
 
 ## Error Handling
 
-### ConsentRequired
-
-Thrown when the user hasn't granted `holochain:sign` permission.
+| Error | When | Suggested UX |
+|-------|------|--------------|
+| `VaultNotFoundError` | Vault not running | "Install or start Flowsta Vault" |
+| `VaultLockedError` | Vault is locked | "Please unlock your Flowsta Vault" |
+| `UserDeniedError` | User rejected dialog | "Identity linking cancelled" |
+| `InvalidClientIdError` | Bad client_id | "App not registered at dev.flowsta.com" |
+| `MissingClientIdError` | No client_id | Developer error |
+| `ApiUnreachableError` | Can't verify app | "Check internet connection" |
 
 ```typescript
-import { ConsentRequired } from '@flowsta/holochain';
+import { linkFlowstaIdentity, VaultNotFoundError, UserDeniedError } from '@flowsta/holochain';
 
 try {
-  await holochain.signAction({ action: myAction });
+  const result = await linkFlowstaIdentity({ ... });
 } catch (error) {
-  if (error instanceof ConsentRequired) {
-    // Re-authenticate with holochain:sign scope
-    auth.login({ scopes: ['openid', 'holochain:sign'] });
+  if (error instanceof VaultNotFoundError) {
+    showMessage('Please install and open Flowsta Vault');
+  } else if (error instanceof UserDeniedError) {
+    showMessage('Identity linking was cancelled');
   }
 }
 ```
 
-### FlowstaHolochainError
+## Integration Guide
 
-General error class for other API errors.
+### 1. Add zomes to your DNA
 
-```typescript
-import { FlowstaHolochainError } from '@flowsta/holochain';
+```toml
+# integrity Cargo.toml
+[dependencies]
+flowsta-agent-linking-integrity = { git = "https://github.com/WeAreFlowsta/flowsta-agent-linking" }
 
-try {
-  await holochain.signAction({ action: myAction });
-} catch (error) {
-  if (error instanceof FlowstaHolochainError) {
-    console.error('Error code:', error.code);
-    console.error('Description:', error.description);
-  }
-}
+# coordinator Cargo.toml
+[dependencies]
+flowsta-agent-linking-coordinator = { git = "https://github.com/WeAreFlowsta/flowsta-agent-linking" }
 ```
 
-## OAuth Scopes
+```yaml
+# dna.yaml
+integrity:
+  zomes:
+    - name: agent_linking_integrity
+      bundled: ../../target/.../flowsta_agent_linking_integrity.wasm
+coordinator:
+  zomes:
+    - name: agent_linking
+      bundled: ../../target/.../flowsta_agent_linking_coordinator.wasm
+      dependencies:
+        - name: agent_linking_integrity
+```
 
-When using this SDK, request these scopes during authentication:
+### 2. Install SDK
 
-| Scope | Description |
-|-------|-------------|
-| `openid` | Required for authentication |
-| `public_key` | Returns the user's Holochain agent public key |
-| `holochain:sign` | **Required** - Allows signing Holochain actions |
+```bash
+npm install @flowsta/holochain
+```
 
-## Security Considerations
+### 3. Register your app
 
-1. **User Consent**: Users must explicitly grant `holochain:sign` permission during OAuth.
-2. **Audit Logging**: All signing operations are logged for user transparency.
-3. **Permission Revocation**: Users can revoke signing permissions at any time from their Flowsta dashboard.
-4. **Rate Limiting**: API endpoints are rate-limited to prevent abuse.
+Register at [dev.flowsta.com](https://dev.flowsta.com) to get a `client_id`.
+
+### 4. Link and query
+
+See [Quick Start](#quick-start) above.
 
 ## License
 
 MIT
-
