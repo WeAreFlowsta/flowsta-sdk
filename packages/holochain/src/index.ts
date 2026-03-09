@@ -222,6 +222,8 @@ export interface RevokeFlowstaIdentityOptions {
 }
 
 export interface CheckFlowstaLinkStatusOptions {
+  /** Developer client_id from dev.flowsta.com */
+  clientId: string;
   /** The third-party agent's public key in uhCAk... format */
   localAgentPubKey: string;
   /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
@@ -490,7 +492,7 @@ export async function checkFlowstaLinkStatus(
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
-      `${ipcUrl}/link-status?app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}`,
+      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}`,
       { signal: controller.signal },
     );
     clearTimeout(timeout);

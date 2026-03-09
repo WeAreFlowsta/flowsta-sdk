@@ -11,9 +11,10 @@ Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| **[@flowsta/auth](./packages/auth)** ⭐ | `2.0.0` | Core OAuth SDK with React bindings |
-| **[@flowsta/login-button](./packages/login-button)** | `0.1.0` | Pre-built button components |
-| **[@flowsta/holochain](./packages/holochain)** | `1.0.0` | Holochain integration |
+| **[@flowsta/auth](./packages/auth)** ⭐ | `2.1.0` | Core OAuth SDK with React bindings |
+| **[@flowsta/login-button](./packages/login-button)** | `0.1.1` | Pre-built button components |
+| **[@flowsta/holochain](./packages/holochain)** | `2.0.0` | Vault agent linking & backup SDK |
+| **[@flowsta/auth-tauri](./packages/auth-tauri)** | `0.1.0` | Desktop auth via Flowsta Vault |
 
 ## 🚀 Getting Started
 
@@ -75,12 +76,24 @@ Pre-built "Sign in with Flowsta" button components.
 
 ### [@flowsta/holochain](./packages/holochain)
 
-Sign Holochain actions using your Flowsta identity.
+Link your Holochain app's agent key with the user's Flowsta Vault identity.
 
 **Features**:
-- ✅ Sign zome calls with Flowsta agent key
-- ✅ Seamless Holochain integration
-- ✅ TypeScript support
+- ✅ Agent identity linking via Vault IPC
+- ✅ Auto-backups to Vault's encrypted storage
+- ✅ Link status checks and revocation
+- ✅ TypeScript-first with full type safety
+- ✅ Zero dependencies
+
+### [@flowsta/auth-tauri](./packages/auth-tauri)
+
+Desktop app authentication via Flowsta Vault's Tauri IPC.
+
+**Features**:
+- ✅ Vault setup, unlock, and lock
+- ✅ Identity management and web account linking
+- ✅ Recovery phrase validation
+- ✅ TypeScript-first with full type safety
 
 ## 💡 Quick Start Examples
 
@@ -300,25 +313,13 @@ Flowsta provides **zero-knowledge authentication** powered by Holochain:
 ### Package READMEs
 - [@flowsta/auth](./packages/auth/README.md) - Core SDK documentation
 - [@flowsta/login-button](./packages/login-button/README.md) - Button components
-- [@flowsta/holochain](./packages/holochain/README.md) - Holochain integration
+- [@flowsta/holochain](./packages/holochain/README.md) - Vault agent linking & backups
+- [@flowsta/auth-tauri](./packages/auth-tauri/README.md) - Desktop auth via Vault
 
 ### Developer Resources
 - **[Developer Portal](https://dev.flowsta.com)** - Create apps, manage settings
 - **[Community Discord](https://discord.gg/p7sfaZTaEc)** - Get help, share ideas
 - **[GitHub Issues](https://github.com/WeAreFlowsta/flowsta-sdk/issues)** - Report bugs
-
-## 🗑️ Deprecated Packages (SDK 1.0)
-
-The following packages are from SDK 1.0 and should **not** be used for new projects:
-
-| Package | Status | Replacement |
-|---------|--------|-------------|
-| `@flowsta/auth-sdk` | ⚠️ Deprecated | Use `@flowsta/auth` (v2.0) |
-| `@flowsta/auth-client` | ⚠️ Deprecated | Use `@flowsta/auth` (v2.0) |
-| `@flowsta/auth-react` | ⚠️ Deprecated | Use `@flowsta/auth/react` |
-| `@flowsta/auth-widgets` | ⚠️ Deprecated | Not needed (OAuth-only in v2.0) |
-
-**Why the migration?** SDK 2.0 uses OAuth-only authentication for better security and simpler integration. No more email/password handling in your app!
 
 ## 🛠️ Development
 
@@ -350,13 +351,10 @@ npm run lint        # Lint code (coming soon)
 ```
 sdk-monorepo/
 ├── packages/
-│   ├── auth/              # Core OAuth SDK (v2.0)
-│   ├── login-button/      # Pre-built button components
-│   ├── holochain/         # Holochain signing integration
-│   ├── core/              # [Deprecated] SDK 1.0 core
-│   ├── client/            # [Deprecated] SDK 1.0 client
-│   ├── react/             # [Deprecated] SDK 1.0 React
-│   └── widgets/           # [Deprecated] SDK 1.0 widgets
+│   ├── auth/              # Core OAuth SDK with React bindings
+│   ├── auth-tauri/        # Desktop auth via Flowsta Vault
+│   ├── holochain/         # Vault agent linking & backup SDK
+│   └── login-button/      # Pre-built button components
 └── README.md
 ```
 
