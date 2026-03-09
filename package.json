@@ -17,6 +17,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git"
+  },
+  "overrides": {
+    "minimatch": ">=10.2.3"
   }
 }
 
