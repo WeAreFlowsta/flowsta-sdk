@@ -1,6 +1,6 @@
 {
   "name": "@flowsta/login-button",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Login with Flowsta button components for React, Vue, Qwik, and vanilla JavaScript",
   "type": "module",
   "main": "./dist/index.js",

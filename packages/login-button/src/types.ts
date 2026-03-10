@@ -23,14 +23,15 @@ export type ButtonVariant =
  * - public_key: Holochain agent public key
  * - profile_picture: User's profile picture
  */
-export type FlowstaScope = 
+export type FlowstaScope =
   | 'openid'
   | 'email'
   | 'display_name'
   | 'username'
   | 'did'
   | 'public_key'
-  | 'profile_picture';
+  | 'profile_picture'
+  | 'holochain';
 
 /**
  * Configuration for the Flowsta login button
@@ -42,7 +43,7 @@ export interface FlowstaLoginConfig {
   /** The URI to redirect back to after authentication (required) */
   redirectUri: string;
   
-  /** OAuth scopes to request (default: ['profile']) */
+  /** OAuth scopes to request (default: ['openid', 'email', 'display_name']) */
   scopes?: FlowstaScope[];
   
   /** Button visual variant (default: 'dark-pill') */

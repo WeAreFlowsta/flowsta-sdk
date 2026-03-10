@@ -33,7 +33,7 @@ import { buildAuthorizationUrl } from './utils/oauth.js';
  * <FlowstaLoginButton
  *   clientId="your-client-id"
  *   redirectUri="https://yourapp.com/callback"
- *   :scopes="['profile', 'email']"
+ *   :scopes="['openid', 'email', 'display_name']"
  *   variant="dark-pill"
  *   @success="handleSuccess"
  *   @error="handleError"
@@ -42,7 +42,7 @@ import { buildAuthorizationUrl } from './utils/oauth.js';
  */
 
 const props = withDefaults(defineProps<VueFlowstaLoginButtonProps>(), {
-  scopes: () => ['profile'],
+  scopes: () => ['openid', 'email', 'display_name'],
   variant: 'dark-pill',
   className: '',
   disabled: false,

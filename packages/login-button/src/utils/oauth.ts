@@ -10,7 +10,7 @@ export interface OAuthConfig {
   clientId: string;
   /** The URI to redirect back to after authentication */
   redirectUri: string;
-  /** OAuth scopes to request (e.g., ['profile', 'email']) */
+  /** OAuth scopes to request (e.g., ['openid', 'email', 'display_name']) */
   scopes: string[];
   /** The Flowsta login URL (default: https://login.flowsta.com) */
   loginUrl?: string;

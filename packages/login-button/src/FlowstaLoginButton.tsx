@@ -15,7 +15,7 @@ import { getButtonUrl, ButtonTheme, ButtonShape } from './buttonAssets.js';
  * <FlowstaLoginButton
  *   clientId="your-client-id"
  *   redirectUri="https://yourapp.com/callback"
- *   scopes={['profile', 'email']}
+ *   scopes={['openid', 'email', 'display_name']}
  *   variant="dark-pill"
  *   onSuccess={(data) => {
  *     console.log('Authorization code:', data.code);
