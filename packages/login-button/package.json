@@ -34,7 +34,7 @@
   ],
   "scripts": {
     "dev": "vite build --watch",
-    "build": "tsc && vite build",
+    "build": "vite build && tsc",
     "test": "echo 'Tests not yet implemented'",
     "prepublishOnly": "npm run build"
   },
