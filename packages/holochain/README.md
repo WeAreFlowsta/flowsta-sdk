@@ -67,6 +67,47 @@ const linked = await getFlowstaIdentity({
 });
 ```
 
+### `backupToVault(options, data)`
+
+Store app data in the user's Vault for backup/portability. Works even when the Vault is locked (after first unlock in the session). Each call without a `label` creates a new timestamped snapshot (max 10 per app, oldest auto-rotated).
+
+```typescript
+import { backupToVault } from '@flowsta/holochain';
+
+await backupToVault(
+  { clientId: 'flowsta_app_abc123...', appName: 'ChessChain' },
+  { games: [...], settings: {...} },
+);
+```
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `clientId` | `string` | Yes | From dev.flowsta.com |
+| `appName` | `string` | Yes | Shown in Vault UI |
+| `label` | `string` | No | Named backup (overwrites same label). Omit for auto-versioned snapshots |
+| `contentType` | `string` | No | Default: `application/json` |
+| `ipcUrl` | `string` | No | Default: `http://127.0.0.1:27777` |
+
+### `startAutoBackup(config)`
+
+Periodically back up app data to the Vault. Returns a `stop()` function.
+
+```typescript
+import { startAutoBackup } from '@flowsta/holochain';
+
+const stop = startAutoBackup({
+  clientId: 'flowsta_app_abc123...',
+  appName: 'ChessChain',
+  intervalMinutes: 60,
+  getData: () => myApp.exportAllData(),
+  onSuccess: (r) => console.log(`Backed up ${r.dataSize} bytes`),
+  onError: (e) => console.warn('Backup skipped:', e.message),
+});
+
+// Later, to stop:
+stop();
+```
+
 ### `getVaultStatus(ipcUrl?)`
 
 Check if Flowsta Vault is running and unlocked.
