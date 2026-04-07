@@ -418,6 +418,155 @@ export class FlowstaAuth {
     return data.linked === true;
   }
 
+  // ── Sign It Methods ──────────────────────────────────────────────
+
+  /**
+   * Sign a file hash. Requires 'sign' scope.
+   * The file is never uploaded — only the hash is sent to the API.
+   *
+   * @example
+   * ```typescript
+   * const hash = await hashFile(file);
+   * const result = await flowsta.signFile({ fileHash: hash, intent: 'authorship' });
+   * ```
+   */
+  async signFile(options: {
+    fileHash: string;
+    intent?: string;
+    aiGeneration?: string;
+    contentRights?: Record<string, string>;
+  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number; action_hash: string | null }> {
+    const token = this.getAccessToken();
+    if (!token) throw new Error('Not authenticated');
+
+    const response = await fetch(`${this.config.apiUrl}/api/v1/sign-it/sign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        file_hash: options.fileHash,
+        intent: options.intent || 'Authorship',
+        ai_generation: options.aiGeneration || null,
+        content_rights: options.contentRights || null,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Signing failed');
+    return data;
+  }
+
+  /**
+   * Sign multiple file hashes in one request. Requires 'sign' scope.
+   * Shared metadata applies to all files unless overridden per-file.
+   */
+  async signBatch(options: {
+    files: Array<{ fileHash: string; intent?: string; aiGeneration?: string; contentRights?: Record<string, string> }>;
+    sharedMetadata?: {
+      intent?: string;
+      aiGeneration?: string;
+      contentRights?: Record<string, string>;
+    };
+  }): Promise<{ results: Array<{ file_hash: string; action_hash: string | null; success: boolean; error?: string }>; signed: number; failed: number }> {
+    const token = this.getAccessToken();
+    if (!token) throw new Error('Not authenticated');
+
+    const response = await fetch(`${this.config.apiUrl}/api/v1/sign-it/sign-batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        files: options.files.map((f) => ({
+          file_hash: f.fileHash,
+          intent: f.intent,
+          ai_generation: f.aiGeneration,
+          content_rights: f.contentRights,
+        })),
+        shared_metadata: options.sharedMetadata
+          ? {
+              intent: options.sharedMetadata.intent,
+              ai_generation: options.sharedMetadata.aiGeneration,
+              content_rights: options.sharedMetadata.contentRights,
+            }
+          : undefined,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Batch signing failed');
+    return data;
+  }
+
+  /**
+   * Verify a file hash — check if it has been signed.
+   * Public endpoint (no authentication required), but authenticated
+   * requests with 'verify' scope get higher rate limits.
+   */
+  async verifyFile(fileHash: string): Promise<{
+    signatures: Array<{
+      file_hash: string;
+      signer: string;
+      signer_did?: string;
+      signed_at: number;
+      intent?: string;
+      ai_generation?: string;
+      content_rights?: Record<string, any>;
+      revoked: boolean;
+      contactable: boolean;
+    }>;
+    count: number;
+  }> {
+    const headers: Record<string, string> = {};
+    const token = this.getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const response = await fetch(
+      `${this.config.apiUrl}/api/v1/sign-it/verify?hash=${encodeURIComponent(fileHash)}`,
+      { headers },
+    );
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Verification failed');
+    return data;
+  }
+
+  /**
+   * Get content rights for a file hash.
+   * Convenience wrapper over verifyFile that returns just the rights info.
+   */
+  async getContentRights(fileHash: string): Promise<{
+    signed: boolean;
+    signerCount: number;
+    rights: Array<{
+      signer: string;
+      license?: string;
+      aiTraining?: string;
+      commercialLicensing?: string;
+      contactPreference?: string;
+      aiGeneration?: string;
+    }>;
+  }> {
+    const result = await this.verifyFile(fileHash);
+    return {
+      signed: result.count > 0,
+      signerCount: result.count,
+      rights: result.signatures
+        .filter((s) => !s.revoked && s.content_rights)
+        .map((s) => ({
+          signer: s.signer_did || s.signer,
+          license: s.content_rights?.license,
+          aiTraining: s.content_rights?.ai_training,
+          commercialLicensing: s.content_rights?.commercial_licensing,
+          contactPreference: s.content_rights?.contact_preference,
+          aiGeneration: s.ai_generation,
+        })),
+    };
+  }
+
   private restoreSession(): void {
     if (typeof localStorage === 'undefined') return;
 
@@ -438,3 +587,30 @@ export class FlowstaAuth {
 
 // Default export for convenience
 export default FlowstaAuth;
+
+// ── Sign It Utilities ─────────────────────────────────────────────
+
+/**
+ * Hash a file using SHA-256 in the browser via SubtleCrypto.
+ * The file is never uploaded — hashing happens entirely client-side.
+ *
+ * @example
+ * ```typescript
+ * import { hashFile } from '@flowsta/auth';
+ *
+ * const input = document.querySelector('input[type=file]');
+ * const file = input.files[0];
+ * const hash = await hashFile(file);
+ * console.log(hash); // "a7f3b9c1e2d4..."
+ * ```
+ *
+ * @param file - A File object from a file input or drag-and-drop
+ * @returns Hex-encoded SHA-256 hash (64 characters)
+ */
+export async function hashFile(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
