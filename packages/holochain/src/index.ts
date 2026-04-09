@@ -751,3 +751,212 @@ export function startAutoBackup(
     }
   };
 }
+
+// ── Sign It: Document Signing ─────────────────────────────────────
+
+export class SigningDnaNotInstalledError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'Signing DNA is not installed in the Vault. Update to the latest Flowsta Vault.',
+      'signing_dna_not_installed',
+    );
+    this.name = 'SigningDnaNotInstalledError';
+  }
+}
+
+export interface SignDocumentOptions {
+  /** Developer client_id from dev.flowsta.com */
+  clientId: string;
+  /** App display name (shown in the Vault approval dialog) */
+  appName: string;
+  /** SHA-256 hex string of the file (64 characters) */
+  fileHash: string;
+  /** Human-readable label shown in the approval dialog (e.g., "Report.pdf") */
+  label?: string;
+  /** Why this file is being signed */
+  intent?: 'authorship' | 'approval' | 'witness' | 'receipt' | 'agreement';
+  /** AI generation disclosure */
+  aiGeneration?: 'none' | 'assisted' | 'generated';
+  /** Content rights manifest */
+  contentRights?: {
+    license?: string;
+    commercialLicensing?: 'not_available' | 'open_to_licensing';
+    aiTraining?: 'allowed' | 'allowed_with_attribution' | 'requires_license' | 'not_allowed';
+    contactPreference?: 'no_contact' | 'allow_contact_requests';
+  };
+  /** IPC URL override (default: http://127.0.0.1:27777) */
+  ipcUrl?: string;
+}
+
+export interface SignDocumentResult {
+  success: boolean;
+  fileHash: string;
+  /** Base64 Ed25519 signature */
+  signature: string;
+  /** Holochain agent public key in uhCAk... format */
+  agentPubKey: string;
+  /** ISO 8601 timestamp */
+  signedAt: string;
+  /** DHT action hash (null if signing DNA not yet active on conductor) */
+  actionHash: string | null;
+}
+
+/**
+ * Sign a document hash via the Flowsta Vault IPC server.
+ *
+ * The user sees an approval dialog in the Vault showing the app name,
+ * file label, and hash. If approved, the Vault signs the hash with
+ * the user's Ed25519 device key and commits a SignatureRecord to the
+ * signing DNA on the local conductor.
+ *
+ * @example
+ * ```typescript
+ * import { signDocument } from '@flowsta/holochain';
+ *
+ * const result = await signDocument({
+ *   clientId: 'flowsta_app_abc123...',
+ *   appName: 'ArtStudio',
+ *   fileHash: 'a7f3b9c1e2d4...', // SHA-256 hex
+ *   label: 'Illustration.png',
+ *   intent: 'authorship',
+ *   aiGeneration: 'none',
+ *   contentRights: {
+ *     license: 'cc-by',
+ *     aiTraining: 'not_allowed',
+ *     contactPreference: 'allow_contact_requests',
+ *   },
+ * });
+ *
+ * console.log('Signed:', result.signature);
+ * console.log('Action hash:', result.actionHash);
+ * ```
+ *
+ * @throws {VaultNotFoundError} Vault is not running
+ * @throws {VaultLockedError} Vault is locked
+ * @throws {UserDeniedError} User rejected the signing request
+ * @throws {SigningDnaNotInstalledError} Signing DNA not available
+ */
+export async function signDocument(
+  options: SignDocumentOptions,
+): Promise<SignDocumentResult> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  // Check Vault is running and unlocked
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const statusResponse = await fetch(`${ipcUrl}/status`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!statusResponse.ok) throw new VaultNotFoundError();
+    const status = await statusResponse.json();
+    if (!status.unlocked) throw new VaultLockedError();
+  } catch (err) {
+    if (err instanceof FlowstaHolochainError) throw err;
+    throw new VaultNotFoundError();
+  }
+
+  // Request document signature
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 70000); // 70s (60s Vault timeout + buffer)
+
+  try {
+    const response = await fetch(`${ipcUrl}/sign-document`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        file_hash: options.fileHash,
+        label: options.label,
+        intent: options.intent,
+        ai_generation: options.aiGeneration,
+        content_rights: options.contentRights
+          ? {
+              license: options.contentRights.license,
+              commercial_licensing: options.contentRights.commercialLicensing,
+              ai_training: options.contentRights.aiTraining,
+              contact_preference: options.contentRights.contactPreference,
+            }
+          : undefined,
+        app_name: options.appName,
+        client_id: options.clientId,
+      }),
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const error = data.error || 'unknown_error';
+
+      if (error === 'vault_locked') throw new VaultLockedError();
+      if (error === 'user_denied') throw new UserDeniedError();
+      if (error === 'signing_dna_not_installed') throw new SigningDnaNotInstalledError();
+
+      throw new FlowstaHolochainError(
+        data.description || `Document signing failed: ${error}`,
+        error,
+        data.description,
+      );
+    }
+
+    const data = await response.json();
+
+    return {
+      success: true,
+      fileHash: data.file_hash,
+      signature: data.signature,
+      agentPubKey: data.agent_pub_key,
+      signedAt: data.signed_at,
+      actionHash: data.action_hash || null,
+    };
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof FlowstaHolochainError) throw err;
+    if ((err as Error).name === 'AbortError') {
+      throw new FlowstaHolochainError(
+        'Document signing timed out. The user may not have responded.',
+        'timeout',
+      );
+    }
+    throw new VaultNotFoundError();
+  }
+}
+
+/**
+ * Check if the Vault has document signing capability (signing DNA installed).
+ *
+ * @example
+ * ```typescript
+ * const status = await getSigningStatus();
+ * if (status.available) {
+ *   // Show "Sign with Flowsta" button
+ * }
+ * ```
+ */
+export async function getSigningStatus(
+  ipcUrl = 'http://127.0.0.1:27777',
+): Promise<{ available: boolean; vaultRunning: boolean; vaultUnlocked: boolean }> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`${ipcUrl}/status`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return { available: false, vaultRunning: false, vaultUnlocked: false };
+    }
+
+    const status = await response.json();
+    return {
+      available: status.unlocked === true,
+      vaultRunning: true,
+      vaultUnlocked: status.unlocked === true,
+    };
+  } catch {
+    return { available: false, vaultRunning: false, vaultUnlocked: false };
+  }
+}
