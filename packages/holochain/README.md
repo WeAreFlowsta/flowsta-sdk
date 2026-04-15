@@ -127,6 +127,53 @@ Notify Vault that a link was revoked (best-effort, won't throw if Vault is offli
 
 Check if Vault still considers an agent linked (detects vault-side revocation).
 
+### `signDocument(options)`
+
+Ask the Vault to sign a file hash. The user sees an approval dialog showing your app name and the file's label + hash. If they approve, the Vault signs with their Ed25519 device key and (if the signing DNA is installed) commits a `SignatureRecord` to the DHT.
+
+```typescript
+import { signDocument } from '@flowsta/holochain';
+
+const result = await signDocument({
+  clientId: 'your_flowsta_app_client_id',
+  appName: 'My Desktop App',
+  fileHash: 'a7f3b9c1e2d4...', // SHA-256 hex
+  label: 'Report.pdf',
+  intent: 'authorship',
+  aiGeneration: 'none',
+  contentRights: {
+    license: 'cc-by',
+    aiTraining: 'not_allowed',
+    contactPreference: 'allow_contact_requests',
+  },
+});
+
+console.log(result.signature);    // Base64 Ed25519 signature
+console.log(result.agentPubKey);  // uhCAk... agent pub key
+console.log(result.actionHash);   // DHT action hash (or null)
+```
+
+Throws:
+- `VaultNotFoundError` — Vault isn't running
+- `VaultLockedError` — Vault is running but locked
+- `UserDeniedError` — User rejected the request
+- `SigningDnaNotInstalledError` — Vault is too old
+
+Your app must be linked in the Vault (via `linkFlowstaIdentity`) and origin-stable across calls — `/sign-document` is gated on caller origin matching a linked app.
+
+### `getSigningStatus(ipcUrl?)`
+
+Lightweight check to decide whether to render a "Sign with Flowsta" button.
+
+```typescript
+const status = await getSigningStatus();
+if (status.available) {
+  // Show the sign button
+}
+```
+
+Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the user or require an approval.
+
 ## Error Handling
 
 | Error | When | Suggested UX |
