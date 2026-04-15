@@ -11,9 +11,9 @@ Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| **[@flowsta/auth](./packages/auth)** ⭐ | `2.1.0` | Core OAuth SDK with React bindings |
-| **[@flowsta/login-button](./packages/login-button)** | `0.1.1` | Pre-built button components |
-| **[@flowsta/holochain](./packages/holochain)** | `2.0.0` | Vault agent linking & backup SDK |
+| **[@flowsta/auth](./packages/auth)** ⭐ | `2.1.1` | Core OAuth SDK with React bindings |
+| **[@flowsta/login-button](./packages/login-button)** | `0.1.3` | Pre-built button components |
+| **[@flowsta/holochain](./packages/holochain)** | `2.1.0` | Vault agent linking & backup SDK |
 | **[@flowsta/auth-tauri](./packages/auth-tauri)** | `0.1.0` | Desktop auth via Flowsta Vault |
 
 ## 🚀 Getting Started
@@ -105,7 +105,7 @@ Perfect for static HTML sites or simple projects:
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login with Flowsta</title>
+  <title>Sign in with Flowsta</title>
 </head>
 <body>
   <a href="#" id="login-btn">
@@ -174,7 +174,7 @@ function Dashboard() {
 ```vue
 <script setup>
 import { FlowstaAuth } from '@flowsta/auth';
-import { FlowstaLoginButtonVue } from '@flowsta/login-button/vue';
+import { FlowstaLoginButton } from '@flowsta/login-button/vue';
 import { ref, onMounted } from 'vue';
 
 const auth = new FlowstaAuth({
@@ -200,7 +200,7 @@ const logout = () => {
 
 <template>
   <div v-if="!isAuthenticated">
-    <FlowstaLoginButtonVue
+    <FlowstaLoginButton
       client-id="your-client-id"
       redirect-uri="https://yoursite.com/callback"
       variant="dark-pill"

@@ -1,6 +1,6 @@
 # @flowsta/auth
 
-Flowsta Auth SDK 2.0 - OAuth-only authentication for web applications.
+Flowsta Auth SDK - OAuth 2.0 authentication with PKCE, Vault detection, and agent linking for web applications.
 
 ## Features
 
@@ -8,6 +8,8 @@ Flowsta Auth SDK 2.0 - OAuth-only authentication for web applications.
 - 🌐 **Zero-Knowledge** - Your users' data stays private
 - ⚡ **Simple Integration** - Just a few lines of code
 - 🎨 **Framework Support** - Vanilla JS, React, and more
+- 🔗 **Agent Linking** - Query Holochain agent identity links
+- 🖥️ **Vault Detection** - Detect local Flowsta Vault desktop app
 
 ## Installation
 
@@ -25,7 +27,7 @@ pnpm add @flowsta/auth
 
 Go to [dev.flowsta.com](https://dev.flowsta.com) and create an app to get your Client ID.
 
-### 2. Add the Login Button
+### 2. Redirect to Login
 
 ```typescript
 import { FlowstaAuth } from '@flowsta/auth';
@@ -54,7 +56,7 @@ const auth = new FlowstaAuth({
 // Handle the OAuth callback
 try {
   const user = await auth.handleCallback();
-  console.log('Logged in as:', user.email);
+  console.log('Logged in as:', user.displayName);
   window.location.href = '/dashboard';
 } catch (error) {
   console.error('Login failed:', error.message);
@@ -102,20 +104,19 @@ function LoginButton() {
 
   return <button onClick={login}>Sign in with Flowsta</button>;
 }
+```
 
-// Callback page
-function AuthCallback() {
-  const { handleCallback, isLoading, error } = useFlowstaAuth();
+### Protected Routes
 
-  useEffect(() => {
-    handleCallback()
-      .then(() => window.location.href = '/dashboard')
-      .catch(console.error);
-  }, []);
+```tsx
+import { useRequireAuth } from '@flowsta/auth/react';
 
-  if (isLoading) return <p>Logging in...</p>;
-  if (error) return <p>Error: {error}</p>;
-  return null;
+function ProtectedPage() {
+  const { isReady, user } = useRequireAuth();
+  // Or redirect to a custom URL: useRequireAuth({ redirectTo: '/login' })
+
+  if (!isReady) return <div>Loading...</div>;
+  return <div>Welcome, {user?.displayName}!</div>;
 }
 ```
 
@@ -127,7 +128,7 @@ function AuthCallback() {
 const auth = new FlowstaAuth({
   clientId: string;      // Required: Your app's client ID
   redirectUri: string;   // Required: OAuth callback URL
-  scopes?: string[];     // Optional: ['profile', 'email'] (default)
+  scopes?: string[];     // Optional: default ['openid', 'email', 'display_name']
   loginUrl?: string;     // Optional: Flowsta login URL
   apiUrl?: string;       // Optional: Flowsta API URL
 });
@@ -139,23 +140,48 @@ const auth = new FlowstaAuth({
 |--------|---------|-------------|
 | `login()` | `Promise<void>` | Redirect to Flowsta login |
 | `handleCallback()` | `Promise<FlowstaUser>` | Handle OAuth callback |
-| `logout()` | `void` | Log out the user |
+| `logout()` | `void` | Clear local session |
 | `isAuthenticated()` | `boolean` | Check if user is logged in |
 | `getUser()` | `FlowstaUser \| null` | Get current user |
 | `getAccessToken()` | `string \| null` | Get access token |
 | `getState()` | `AuthState` | Get full auth state |
+| `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally |
+| `getLinkedAgents(agentPubKey?)` | `Promise<string[]>` | Get agents linked to current user or a specific agent |
+| `areAgentsLinked(agentA, agentB)` | `Promise<boolean>` | Check if two agents are linked |
 
 ### FlowstaUser
 
 ```typescript
 interface FlowstaUser {
   id: string;
-  email?: string;          // If 'email' scope was granted
-  username?: string;       // User's username (if set)
-  displayName?: string;    // Display name
-  profilePicture?: string; // Profile picture URL
-  agentPubKey?: string;    // Holochain agent public key
-  did?: string;            // Decentralized Identifier
+  email?: string;              // If 'email' scope was granted
+  username?: string;           // User's username (if set)
+  displayName?: string;        // Display name
+  profilePicture?: string;     // Profile picture URL
+  agentPubKey?: string;        // Holochain agent public key
+  did?: string;                // W3C Decentralized Identifier
+  linkedAgents?: LinkedAgent[];// Linked agents (DHT-verified)
+  signingMode?: 'remote' | 'ipc'; // 'remote' = API, 'ipc' = Vault
+}
+
+interface LinkedAgent {
+  agentPubKey: string;
+  linkedAt?: string;
+  isRevoked: boolean;
+}
+
+interface VaultDetectionResult {
+  running: boolean;
+  agentPubKey?: string;
+  did?: string;
+}
+
+interface AuthState {
+  isAuthenticated: boolean;
+  user: FlowstaUser | null;
+  accessToken: string | null;
+  isLoading: boolean;
+  error: string | null;
 }
 ```
 
@@ -166,26 +192,15 @@ This SDK uses **OAuth 2.0 Authorization Code Flow with PKCE**, which means:
 - ✅ No client secrets needed (safe for browser/mobile apps)
 - ✅ Authorization codes are protected by PKCE challenge
 - ✅ State parameter prevents CSRF attacks
-- ✅ Tokens are securely stored in localStorage
+- ✅ Access and refresh tokens stored in `localStorage`
+- ✅ PKCE verifiers stored in `sessionStorage` (cleared after use)
 
-## Migration from SDK 1.x
+## Documentation
 
-SDK 2.0 removes direct email/password authentication. All users now authenticate through Flowsta's hosted login page.
-
-**Before (SDK 1.x):**
-```typescript
-// ❌ Deprecated - do not use
-await auth.login(email, password);
-await auth.register(email, password);
-```
-
-**After (SDK 2.0):**
-```typescript
-// ✅ OAuth redirect
-await auth.login(); // Redirects to login.flowsta.com
-```
+- [SDK Documentation](https://docs.flowsta.com/sdk/auth)
+- [OAuth Integration Guide](https://docs.flowsta.com/auth/)
+- [API Reference](https://docs.flowsta.com/auth/api-reference)
 
 ## License
 
 MIT
-

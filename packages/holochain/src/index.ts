@@ -566,7 +566,7 @@ export async function backupToVault(
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    if (err.error === 'vault_locked') throw new VaultLockedError();
+    if (err.error === 'vault_locked' || err.error === 'vault_never_unlocked') throw new VaultLockedError();
     throw new FlowstaHolochainError(
       err.description || 'Backup failed',
       err.error || 'backup_failed',
@@ -713,9 +713,9 @@ export function startAutoBackup(
     if (stopped) return;
 
     try {
-      // Check vault is available first
+      // Check vault IPC is reachable (backup works even when locked)
       const status = await getVaultStatus(config.ipcUrl);
-      if (!status.running || !status.unlocked) return;
+      if (!status.running) return;
 
       const data = await config.getData();
 
