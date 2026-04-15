@@ -10,6 +10,7 @@ Flowsta Auth SDK - OAuth 2.0 authentication with PKCE, Vault detection, and agen
 - 🎨 **Framework Support** - Vanilla JS, React, and more
 - 🔗 **Agent Linking** - Query Holochain agent identity links
 - 🖥️ **Vault Detection** - Detect local Flowsta Vault desktop app
+- ✍️ **Sign It** - Sign files on behalf of the authenticated user (requires `sign` scope)
 
 ## Installation
 
@@ -120,6 +121,67 @@ function ProtectedPage() {
 }
 ```
 
+## Sign It
+
+Let your users sign files with their Flowsta identity. Hashing happens in the browser — **files are never uploaded**.
+
+Add the `sign` scope when you construct `FlowstaAuth`:
+
+```typescript
+const flowsta = new FlowstaAuth({
+  clientId: 'your_client_id',
+  redirectUri: 'https://your-app.com/callback',
+  scopes: ['openid', 'email', 'display_name', 'sign'],
+});
+```
+
+Users see "This app wants to sign files on your behalf" in the consent screen.
+
+### Sign a file
+
+```typescript
+import { FlowstaAuth, hashFile } from '@flowsta/auth';
+
+const file = fileInput.files[0];
+const hash = await hashFile(file);
+
+const result = await flowsta.signFile({
+  fileHash: hash,
+  intent: 'authorship',
+  contentRights: {
+    license: 'cc-by',
+    ai_training: 'not_allowed',
+    contact_preference: 'allow_contact_requests',
+  },
+});
+
+console.log('Action hash:', result.action_hash);
+console.log('Signed at:', result.signed_at);
+```
+
+### Verify a file
+
+```typescript
+const { signatures, count } = await flowsta.verifyFile(hash);
+if (count > 0) {
+  console.log(`${count} signer(s):`);
+  signatures.forEach((s) => console.log(s.signer, s.revoked ? '(revoked)' : ''));
+}
+```
+
+### Check content rights
+
+```typescript
+const rights = await flowsta.getContentRights(hash);
+if (rights.signed) {
+  rights.rights.forEach((r) => {
+    console.log(r.signer, '→', r.license, '/', r.aiTraining);
+  });
+}
+```
+
+See the full [Sign It documentation](https://docs.flowsta.com/sign-it/) for field values, content-rights spec, and the verification API.
+
 ## API Reference
 
 ### FlowstaAuth
@@ -148,6 +210,16 @@ const auth = new FlowstaAuth({
 | `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally |
 | `getLinkedAgents(agentPubKey?)` | `Promise<string[]>` | Get agents linked to current user or a specific agent |
 | `areAgentsLinked(agentA, agentB)` | `Promise<boolean>` | Check if two agents are linked |
+| `signFile(options)` | `Promise<SignResult>` | Sign a file hash (requires `sign` scope). The file is never uploaded. |
+| `signBatch(options)` | `Promise<SignBatchResult>` | Sign multiple hashes in one request |
+| `verifyFile(hash)` | `Promise<VerifyResult>` | Check if a hash has been signed. Public endpoint. |
+| `getContentRights(hash)` | `Promise<ContentRightsResult>` | Return just the declared content-rights for a hash |
+
+#### Utilities
+
+| Export | Returns | Description |
+|--------|---------|-------------|
+| `hashFile(file)` | `Promise<string>` | SHA-256 hex hash of a File, computed entirely in the browser |
 
 ### FlowstaUser
 

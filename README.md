@@ -11,9 +11,9 @@ Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| **[@flowsta/auth](./packages/auth)** ⭐ | `2.1.1` | Core OAuth SDK with React bindings |
+| **[@flowsta/auth](./packages/auth)** ⭐ | `2.2.0` | Core OAuth SDK + Sign It (file signing & verification) |
 | **[@flowsta/login-button](./packages/login-button)** | `0.1.3` | Pre-built button components |
-| **[@flowsta/holochain](./packages/holochain)** | `2.1.0` | Vault agent linking & backup SDK |
+| **[@flowsta/holochain](./packages/holochain)** | `2.2.0` | Vault agent linking, backups, and Sign It document signing |
 | **[@flowsta/auth-tauri](./packages/auth-tauri)** | `0.1.0` | Desktop auth via Flowsta Vault |
 
 ## 🚀 Getting Started
