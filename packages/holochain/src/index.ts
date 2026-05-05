@@ -237,9 +237,49 @@ export interface VaultStatus {
   unlocked: boolean;
   /** Agent public key (if unlocked) */
   agentPubKey?: string;
+  /** Display name of the currently-unlocked Flowsta account */
+  displayName?: string;
+  /** Profile picture (data URI or URL) of the currently-unlocked Flowsta account */
+  profilePicture?: string;
   /** Vault version */
   version?: string;
 }
+
+/**
+ * Rich link-status returned by `getFlowstaLinkStatus()`. Distinguishes the
+ * three states a third-party app can find itself in vs. Flowsta Vault.
+ *
+ * Use this instead of the boolean returned by the older `checkFlowstaLinkStatus`
+ * — it lets you tell apart "the user genuinely unlinked / changed Vault account"
+ * (`state: 'unlinked'`) from "Vault isn't running right now"
+ * (`state: 'offline'`), which want very different UX responses.
+ */
+export type FlowstaLinkStatus =
+  | {
+      /** Vault is running, the app's agent is in its linked-apps list. */
+      state: 'linked';
+      /** Display name Vault has on file for this app, if known. */
+      appName?: string;
+    }
+  | {
+      /**
+       * Vault is running but does NOT recognize the app's agent as linked.
+       * Could mean the user unlinked from Vault's UI, switched to a
+       * different Flowsta account, or restored a fresh Vault from a
+       * different recovery phrase. In all cases the recommended UX is the
+       * same: surface a clear "reconnect or disconnect" prompt to the user
+       * rather than silently revoking on their behalf.
+       */
+      state: 'unlinked';
+    }
+  | {
+      /**
+       * Vault is not reachable. Treat existing local link state as
+       * authoritative for now (offline-tolerant) — don't revoke yet,
+       * the Vault may simply be closed.
+       */
+      state: 'offline';
+    };
 
 // ── Functions ──────────────────────────────────────────────────────
 
@@ -270,10 +310,77 @@ export async function getVaultStatus(
       running: true,
       unlocked: !!data.unlocked,
       agentPubKey: data.agent_pub_key || data.agentPubKey,
+      displayName: data.display_name || data.displayName,
+      profilePicture: data.profile_picture || data.profilePicture,
       version: data.version,
     };
   } catch {
     return { running: false, unlocked: false };
+  }
+}
+
+/**
+ * Get the current link status between this app and Flowsta Vault, with
+ * enough nuance to distinguish "Vault running but says no" from
+ * "Vault not running right now".
+ *
+ * This is the recommended replacement for `checkFlowstaLinkStatus` —
+ * the old boolean conflates the offline and unlinked states, which leads
+ * apps to silently revoke users when the Vault is simply closed.
+ *
+ * @example
+ * ```typescript
+ * const status = await getFlowstaLinkStatus({
+ *   clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
+ *   localAgentPubKey: myAgentKey,
+ * });
+ *
+ * switch (status.state) {
+ *   case 'linked':
+ *     // All good — full feature access.
+ *     break;
+ *   case 'unlinked':
+ *     // Vault running but doesn't recognize this link. Show a banner
+ *     // letting the user re-link with their current Vault account, or
+ *     // disconnect deliberately. Do NOT auto-revoke.
+ *     break;
+ *   case 'offline':
+ *     // Vault not running. Trust local state, surface a subtle hint
+ *     // ("reconnect Vault to sync") if needed.
+ *     break;
+ * }
+ * ```
+ */
+export async function getFlowstaLinkStatus(
+  options: CheckFlowstaLinkStatusOptions,
+): Promise<FlowstaLinkStatus> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    const response = await fetch(
+      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}`,
+      { signal: controller.signal },
+    );
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      // HTTP-level error from a running Vault. Treat as offline so we don't
+      // surface a misleading "unlinked" state — the request shape may be
+      // wrong or the endpoint temporarily unhealthy.
+      return { state: 'offline' };
+    }
+
+    const data = await response.json();
+    if (data.linked) {
+      return { state: 'linked', appName: data.app_name };
+    }
+    return { state: 'unlinked' };
+  } catch {
+    // fetch threw — Vault not reachable.
+    return { state: 'offline' };
   }
 }
 
@@ -464,11 +571,11 @@ export async function revokeFlowstaIdentity(
 /**
  * Check if Flowsta Vault still considers this agent linked.
  *
- * Used to detect vault-side revocation. If the user revoked from Vault's UI,
- * this will return `{ linked: false }` so the third-party app can clean up
- * its DHT entry.
- *
- * Returns `{ linked: false }` if Vault is not running (can't determine).
+ * @deprecated Prefer {@link getFlowstaLinkStatus} which returns a richer
+ * `{ state: 'linked' | 'unlinked' | 'offline' }` shape. This function
+ * collapses "Vault not running" and "Vault says no link" into the same
+ * `{ linked: false }` response, which often leads apps to silently revoke
+ * users when the Vault is simply closed. Kept for backward compatibility.
  *
  * @example
  * ```typescript
