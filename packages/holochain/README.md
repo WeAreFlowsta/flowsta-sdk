@@ -110,22 +110,74 @@ stop();
 
 ### `getVaultStatus(ipcUrl?)`
 
-Check if Flowsta Vault is running and unlocked.
+Check if Flowsta Vault is running and unlocked. When the vault is unlocked,
+the returned `VaultStatus` also carries the currently-active account's
+`displayName` and `profilePicture` so you can render an "in as <Name>"
+chip without hitting `/status` directly. _(2.3.0)_
 
 ```typescript
 const status = await getVaultStatus();
 if (!status.running) {
   // Prompt user to open Flowsta Vault
+} else if (status.unlocked) {
+  console.log(`Signed in as ${status.displayName ?? 'Flowsta Account'}`);
 }
 ```
+
+### `getFlowstaLinkStatus(options)` _(2.3.0)_
+
+Returns the canonical three-state link status. This is the recommended
+replacement for `checkFlowstaLinkStatus` — the old boolean conflated
+"Vault running, doesn't recognise this app's agent" and "Vault not
+running right now", which led apps to silently revoke users when the
+Vault was simply closed.
+
+```typescript
+import { getFlowstaLinkStatus } from '@flowsta/holochain';
+
+const status = await getFlowstaLinkStatus({
+  clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
+  localAgentPubKey: myAgentKey,
+});
+
+switch (status.state) {
+  case 'linked':
+    // Vault is running and recognises this app's agent. Full access.
+    break;
+  case 'unlinked':
+    // Vault is running but doesn't recognise this app's agent — the
+    // user unlinked from Vault's UI, switched Flowsta accounts, or
+    // restored a fresh Vault from a different recovery phrase. Surface
+    // a "reconnect or disconnect" prompt rather than silently revoking.
+    break;
+  case 'offline':
+    // Vault not reachable. Trust local link state as authoritative —
+    // the Vault may simply be closed.
+    break;
+}
+```
+
+The recommended UX pattern: render a top-of-page banner when state is
+`unlinked`, explaining the mismatch and offering "Reconnect" (re-link
+with the current Vault account) or "Disconnect" (deliberately revoke).
+Never auto-revoke on `unlinked` — past data created against the local
+agent stays the user's regardless of their Vault link choice.
+
+ProofPoll has the reference implementation: see
+[ProofPoll/src/lib/context.ts](https://github.com/WeAreFlowsta/ProofPoll/blob/main/src/lib/context.ts)
+and [ProofPoll/src/routes/layout.tsx](https://github.com/WeAreFlowsta/ProofPoll/blob/main/src/routes/layout.tsx)
+for the layout-level banner + greyed-out profile chip pattern.
 
 ### `revokeFlowstaIdentity(options)`
 
 Notify Vault that a link was revoked (best-effort, won't throw if Vault is offline).
 
-### `checkFlowstaLinkStatus(options)`
+### `checkFlowstaLinkStatus(options)` _(deprecated — use `getFlowstaLinkStatus`)_
 
-Check if Vault still considers an agent linked (detects vault-side revocation).
+Returns a `{ linked: boolean }` indicating whether Vault still recognises
+the agent. Kept for backwards compatibility; new code should use
+`getFlowstaLinkStatus` to distinguish the offline state from a genuine
+unlink.
 
 ### `signDocument(options)`
 
