@@ -282,10 +282,17 @@ export interface VaultStatus {
   unlocked: boolean;
   /** Agent public key (if unlocked) */
   agentPubKey?: string;
-  /** Display name of the currently-unlocked Flowsta account */
+  /** Display name of the currently-unlocked Flowsta account.
+   *  Only populated when the requesting app has the `display_name` scope
+   *  configured at dev.flowsta.com and the user approved it at link time. */
   displayName?: string;
-  /** Profile picture (data URI or URL) of the currently-unlocked Flowsta account */
+  /** Profile picture (data URI or URL) of the currently-unlocked Flowsta account.
+   *  Only populated when the requesting app has the `profile_picture` scope. */
   profilePicture?: string;
+  /** Unique global username of the currently-unlocked Flowsta account
+   *  (claimed at flowsta.com). Only populated when the requesting app has
+   *  the `username` scope configured at dev.flowsta.com. */
+  webUsername?: string;
   /** Vault version */
   version?: string;
 }
@@ -357,6 +364,7 @@ export async function getVaultStatus(
       agentPubKey: data.agent_pub_key || data.agentPubKey,
       displayName: data.display_name || data.displayName,
       profilePicture: data.profile_picture || data.profilePicture,
+      webUsername: data.web_username || data.webUsername,
       version: data.version,
     };
   } catch {
