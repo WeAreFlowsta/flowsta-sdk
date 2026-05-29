@@ -1,12 +1,20 @@
 # @flowsta/holochain
 
-Link your Holochain app's agent key with the user's Flowsta Vault identity.
+Link your Holochain app's agent key with the user's Flowsta Vault identity, then get encrypted backups, reinstall recovery, document signing, and a [Cryptographic Autonomy License](https://github.com/holochain/cryptographic-autonomy-license)-compliant user data export for free.
 
 ## Overview
 
-Flowsta Vault acts as a local identity provider (like MetaMask for Ethereum) for Holochain apps. This SDK lets you request a signed identity attestation from the Vault via IPC, then commit it to your own DHT using the `flowsta-agent-linking` Rust crate.
+Flowsta Vault acts as a local identity provider (like MetaMask for Ethereum) for Holochain apps. This SDK lets you:
 
-**No shared DNA or API dependency required.** Anyone on your DHT can verify the user's Flowsta identity purely via Ed25519 cryptography.
+- **Link identity** — request a signed identity attestation from the Vault via IPC and commit it to your DHT using the [`flowsta-agent-linking`](https://github.com/WeAreFlowsta/flowsta-agent-linking) Rust crate. Anyone on your DHT can verify the user's Flowsta identity purely via Ed25519 cryptography.
+- **Read user profile** — display name, profile picture, and unique username from `getVaultStatus()`, scope-gated. No signup forms or avatar uploads needed.
+- **Auto-backup + reinstall recovery (v2.4.0+)** — canonical-shape backups with a dispatcher pattern for restore. One small `match` per entry type covers both sides forever.
+- **CAL §4.2.1 data export** — the Vault's "Download Export" produces a portable JSON file with the user's cryptographic keys and your app's records in plain English. The export every CAL-licensed Holochain app must provide; you write nothing.
+- **Document signing** — `signDocument()` over Vault IPC.
+
+**No shared DNA or API dependency required for identity linking.** Anyone on your DHT can verify the user's Flowsta identity purely via Ed25519 cryptography.
+
+Full docs: [docs.flowsta.com/sdk/holochain](https://docs.flowsta.com/sdk/holochain) • [Why integrate Flowsta](https://docs.flowsta.com/getting-started/why-flowsta) • [Backups & Reinstall Recovery](https://docs.flowsta.com/sdk/holochain#backups)
 
 ## Installation
 
@@ -69,13 +77,13 @@ const linked = await getFlowstaIdentity({
 
 ### `backupToVault(options, data)`
 
-Store app data in the user's Vault for backup/portability. Works even when the Vault is locked (after first unlock in the session). Each call without a `label` creates a new timestamped snapshot (max 10 per app, oldest auto-rotated).
+Store app data in the user's Vault for backup/portability. Works even when the Vault is locked (after first unlock in the session). Each call without a `label` creates a new timestamped snapshot (max 10 per app, oldest auto-rotated). Pass `label: "latest"` to overwrite a single backup.
 
 ```typescript
 import { backupToVault } from '@flowsta/holochain';
 
 await backupToVault(
-  { clientId: 'flowsta_app_abc123...', appName: 'ChessChain' },
+  { clientId: 'flowsta_app_abc123...', appName: 'ChessChain', label: 'latest' },
   { games: [...], settings: {...} },
 );
 ```
@@ -88,32 +96,111 @@ await backupToVault(
 | `contentType` | `string` | No | Default: `application/json` |
 | `ipcUrl` | `string` | No | Default: `http://127.0.0.1:27777` |
 
-### `startAutoBackup(config)`
+### `startAutoBackup(config)` _(canonical-shape, v2.4.0+)_
 
-Periodically back up app data to the Vault. Returns a `stop()` function.
+Automatically back up the user's source chain to the Vault as canonical-shape payloads. The Vault recognises this shape and unlocks per-entry-type counts on its Your Data page ("12 polls, 38 votes") + inlines a human-readable view of each record into the user's CAL §4.2.1 data export.
+
+Two signatures — both still supported:
+
+**v2.4.0+ canonical-shape (recommended).** Pass an `AdminWebsocket` + a per-entry-type decoder. Returns an `AutoBackupController { triggerBackupSoon(), stop() }`.
 
 ```typescript
 import { startAutoBackup } from '@flowsta/holochain';
+import { invoke } from '@tauri-apps/api/core';
 
-const stop = startAutoBackup({
+const controller = startAutoBackup({
   clientId: 'flowsta_app_abc123...',
   appName: 'ChessChain',
-  intervalMinutes: 60,
-  getData: () => myApp.exportAllData(),
+  adminWebsocket: adminWs,                  // your AdminWebsocket instance
+  cellId: gamesCellId,                      // [DnaHash, AgentPubKey] tuple
+  cellRoleName: 'games',
+  agentPubKey: myAgentBytes,                // filter source chain to user's authored records
+  decodeRecordForExport: (entryType, entryB64) =>
+    invoke('decode_record_for_export', { entryType, entryBytesB64: entryB64 }),
+  triggerOnWrite: true,                     // default; debounce 30s
+  heartbeatMinutes: 30,                     // default; safety-net retry
+  label: 'latest',                          // default; single overwriting backup
   onSuccess: (r) => console.log(`Backed up ${r.dataSize} bytes`),
   onError: (e) => console.warn('Backup skipped:', e.message),
 });
 
-// Later, to stop:
+// Call after each successful zome write to debounce-trigger a backup:
+controller.triggerBackupSoon();
+
+// On sign-out / app close:
+controller.stop();
+```
+
+You provide one Tauri command, `decode_record_for_export`, with one `match` arm per entry type. Each arm decodes the entry's MessagePack bytes with `rmp_serde::from_slice` and converts to JSON via `serde_json::to_value(struct)` — leveraging the existing `#[derive(Serialize)]` on your entry structs. See [docs.flowsta.com/sdk/holochain#backups](https://docs.flowsta.com/sdk/holochain#backups) for the full code.
+
+**Legacy `getData` signature (backwards-compatible).** Pass a `getData()` callback that returns the backup data directly. Returns a `stop()` function. Use this for apps that build the payload themselves on the Rust side (see [the Rust-side alternative](https://docs.flowsta.com/sdk/holochain#rust-side-alternative-for-app-websocket-apps) in the docs):
+
+```typescript
+const stop = startAutoBackup({
+  clientId: 'flowsta_app_abc123...',
+  appName: 'ChessChain',
+  intervalMinutes: 60,
+  getData: () => invoke('build_canonical_backup'),
+  onSuccess: (r) => console.log(`Backed up ${r.dataSize} bytes`),
+  onError: (e) => console.warn('Backup skipped:', e.message),
+});
+
 stop();
+```
+
+### `restoreFromVault(options)` _(2.4.0+)_
+
+Walk a Vault backup and call a dispatcher once per record — used to restore data on a fresh install. Per-record failures are caught; the function continues through the remaining records and returns a `{ totalRecords, succeeded, failed }` summary.
+
+```typescript
+import { restoreFromVault, listVaultBackups } from '@flowsta/holochain';
+
+const backups = await listVaultBackups();
+const ours = backups.apps.find(a => a.clientId === clientId);
+if (ours && ours.backupCount > 0 && /* local source chain is empty */) {
+  const result = await restoreFromVault({
+    clientId,
+    dispatcher: async (record) => {
+      // record: { entryType, actionHash, createdAtMs, human_readable, raw_record, cellRoleName }
+      await invoke('restore_record', {
+        entryType: record.entryType,
+        entryBytesB64: record.raw_record.entry_b64,
+      });
+    },
+    onProgress: (current, total) => updateProgressUI(current, total),
+  });
+  console.log(`Restored ${result.succeeded}/${result.totalRecords}`);
+}
+```
+
+On the Rust side, `restore_record` is the symmetric `match` — decode the entry, then call the matching zome function.
+
+### `dumpCellStateForBackup(options)` _(2.4.0+)_
+
+Build a canonical-shape `records[]` array from a Holochain admin `dumpFullState` call. Used internally by `startAutoBackup`'s v2.4 signature; exposed so apps can serialise to file (debug) or transform before posting:
+
+```typescript
+import { dumpCellStateForBackup } from '@flowsta/holochain';
+
+const { records, summary } = await dumpCellStateForBackup({
+  adminWebsocket: adminWs,
+  cellId: gamesCellId,
+  agentPubKey: myAgentBytes,
+  roleName: 'games',
+  decodeRecordForExport: (entryType, entryB64) =>
+    invoke('decode_record_for_export', { entryType, entryBytesB64: entryB64 }),
+});
 ```
 
 ### `getVaultStatus(ipcUrl?)`
 
-Check if Flowsta Vault is running and unlocked. When the vault is unlocked,
-the returned `VaultStatus` also carries the currently-active account's
-`displayName` and `profilePicture` so you can render an "in as <Name>"
-chip without hitting `/status` directly. _(2.3.0)_
+Check if Flowsta Vault is running and unlocked. When the vault is unlocked, the returned `VaultStatus` carries the currently-active account's profile fields so you can render a `Signed in as ${displayName}` chip without hitting `/status` directly:
+
+- `displayName` _(2.3.0+)_ — scope-gated by `display_name`
+- `profilePicture` _(2.3.0+)_ — scope-gated by `profile_picture`
+- `webUsername` _(2.4.1+)_ — scope-gated by `username`
+
+Scopes are configured per `client_id` at [dev.flowsta.com](https://dev.flowsta.com); the user approves them once at link time. Fields are `undefined` until granted.
 
 ```typescript
 const status = await getVaultStatus();
@@ -121,6 +208,7 @@ if (!status.running) {
   // Prompt user to open Flowsta Vault
 } else if (status.unlocked) {
   console.log(`Signed in as ${status.displayName ?? 'Flowsta Account'}`);
+  if (status.webUsername) console.log(`@${status.webUsername}`);
 }
 ```
 
@@ -236,6 +324,10 @@ Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the us
 | `InvalidClientIdError` | Bad client_id | "App not registered at dev.flowsta.com" |
 | `MissingClientIdError` | No client_id | Developer error |
 | `ApiUnreachableError` | Can't verify app | "Check internet connection" |
+| `BackupTooLargeError` _(2.4.0)_ | Payload exceeds Vault's 50 MB per-app limit | "Backup too large — try clearing old entries" |
+| `DispatcherFailedError` _(2.4.0)_ | A `restoreFromVault` dispatcher threw on a record | Surface in the restore summary; offer retry |
+| `RestoreInProgressError` _(2.4.0)_ | Concurrent `restoreFromVault` calls collided | Disable the restore button while one is running |
+| `DecodeFailedError` _(2.4.0)_ | `decodeRecordForExport` threw on an entry | Backup continues; record carries `_warning: "decode_failed"` |
 
 ```typescript
 import { linkFlowstaIdentity, VaultNotFoundError, UserDeniedError } from '@flowsta/holochain';
