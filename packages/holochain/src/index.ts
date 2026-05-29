@@ -106,6 +106,51 @@ export class ApiUnreachableError extends FlowstaHolochainError {
   }
 }
 
+export class BackupTooLargeError extends FlowstaHolochainError {
+  constructor(sizeBytes: number, maxBytes: number) {
+    super(
+      `Backup payload is ${sizeBytes} bytes, exceeds Vault limit of ${maxBytes} bytes.`,
+      'backup_too_large',
+    );
+    this.name = 'BackupTooLargeError';
+  }
+}
+
+export class DispatcherFailedError extends FlowstaHolochainError {
+  constructor(
+    public readonly record: BackupRecord,
+    public readonly cause: unknown,
+  ) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `Restore dispatcher failed for ${record.entryType}: ${reason}`,
+      'dispatcher_failed',
+    );
+    this.name = 'DispatcherFailedError';
+  }
+}
+
+export class RestoreInProgressError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'A restore operation is already in progress for this client_id.',
+      'restore_in_progress',
+    );
+    this.name = 'RestoreInProgressError';
+  }
+}
+
+export class DecodeFailedError extends FlowstaHolochainError {
+  constructor(public readonly entryType: string, public readonly cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `Decoder failed for entry type "${entryType}": ${reason}`,
+      'decode_failed',
+    );
+    this.name = 'DecodeFailedError';
+  }
+}
+
 // ── Backup Types ──────────────────────────────────────────────────
 
 export interface FlowstaBackupOptions {
@@ -784,80 +829,9 @@ export async function listVaultBackups(
   }
 }
 
-/**
- * Set up automatic backups to Flowsta Vault.
- *
- * Calls your `getData()` function on a schedule and backs up the result
- * to the vault. Returns a `stop()` function to cancel the auto-backup.
- *
- * @example
- * ```typescript
- * import { startAutoBackup } from '@flowsta/holochain';
- *
- * const stop = startAutoBackup({
- *   clientId: 'flowsta_app_abc123...',
- *   appName: 'ProofPoll',
- *   intervalMinutes: 30,
- *   getData: () => myApp.exportAllData(),
- *   onSuccess: (r) => console.log(`Backed up ${r.dataSize} bytes`),
- *   onError: (e) => console.warn('Backup failed:', e.message),
- * });
- *
- * // Later, to stop:
- * stop();
- * ```
- *
- * @returns A function that stops the auto-backup when called
- */
-export function startAutoBackup(
-  config: FlowstaAutoBackupConfig,
-): () => void {
-  const intervalMs = (config.intervalMinutes ?? 60) * 60 * 1000;
-  let timer: ReturnType<typeof setInterval> | null = null;
-  let stopped = false;
-
-  const doBackup = async () => {
-    if (stopped) return;
-
-    try {
-      // Check vault IPC is reachable (backup works even when locked)
-      const status = await getVaultStatus(config.ipcUrl);
-      if (!status.running) return;
-
-      const data = await config.getData();
-
-      const result = await backupToVault(
-        {
-          clientId: config.clientId,
-          appName: config.appName,
-          label: config.label,
-          ipcUrl: config.ipcUrl,
-        },
-        data,
-      );
-
-      config.onSuccess?.(result);
-    } catch (err) {
-      config.onError?.(err instanceof Error ? err : new Error(String(err)));
-    }
-  };
-
-  // Run first backup immediately
-  doBackup();
-
-  // Schedule recurring backups
-  if (intervalMs > 0) {
-    timer = setInterval(doBackup, intervalMs);
-  }
-
-  return () => {
-    stopped = true;
-    if (timer !== null) {
-      clearInterval(timer);
-      timer = null;
-    }
-  };
-}
+// `startAutoBackup` is defined later in the file with both the v2.3.0 and
+// v2.4.0+ signatures via overloads. See the "Generic source-chain backup
+// helpers" section near the end of this file.
 
 // ── Sign It: Document Signing ─────────────────────────────────────
 
@@ -1066,4 +1040,493 @@ export async function getSigningStatus(
   } catch {
     return { available: false, vaultRunning: false, vaultUnlocked: false };
   }
+}
+
+// ── Generic source-chain backup helpers (v2.4.0+) ──────────────────
+//
+// Replaces the per-app `get_export_data` pattern with a generic
+// `dumpFullState`-based capture. Each backed-up record carries both a
+// human_readable view (decoded entry, for the user's CAL §4.2.1 export)
+// AND a raw_record view (signed Holochain record, for restore).
+//
+// See build-docs/current/GENERIC_BACKUP_PLAN.md.
+
+/** Minimal subset of @holochain/client AdminWebsocket needed for backup. */
+export interface AdminWebsocketLike {
+  dumpFullState(req: { cell_id: unknown }): Promise<{
+    source_chain_dump: {
+      records: Array<{
+        signature: unknown;
+        action_address: unknown;
+        action: { type: string; author: unknown; timestamp: number; [k: string]: unknown };
+        entry: { entry_type?: string; entry?: Uint8Array | string } | undefined;
+      }>;
+      published_ops_count: number;
+    };
+  }>;
+}
+
+/** A single record in a canonical-shape backup. */
+export interface BackupRecord {
+  /** Entry type name from the DNA (e.g. "Poll", "Vote"). */
+  entryType: string;
+  /** Action hash as a base64 string. */
+  actionHash: string;
+  /** Action timestamp in milliseconds since epoch. */
+  createdAtMs: number;
+  /** Decoded entry as plain JSON. Populated by the caller-supplied decoder. */
+  human_readable: unknown;
+  /** Signed Holochain record for restore + verification. */
+  raw_record: {
+    action: unknown;
+    action_address: unknown;
+    signature: unknown;
+    /** Base64-encoded MessagePack bytes of the entry. Undefined when the action has no entry payload. */
+    entry_b64: string | undefined;
+  };
+  /** Role name of the cell this record was authored in. */
+  cellRoleName: string;
+}
+
+/** Per-entry-type count summary that Vault can render without decrypting. */
+export interface BackupSummary {
+  /** Counts keyed by entryType. */
+  countsByEntryType: Record<string, number>;
+  /** Total record count across all entry types. */
+  totalRecords: number;
+}
+
+/** Canonical backup payload posted to Vault. */
+export interface BackupPayload {
+  version: 1;
+  _readme: string;
+  license: 'Cryptographic Autonomy License v1.0 (CAL-1.0)';
+  app: {
+    name: string;
+    client_id: string;
+  };
+  agent_pub_key: string;
+  exported_at_iso: string;
+  _summary: BackupSummary;
+  cells: Array<{
+    role_name: string;
+    _readme: string;
+    records: BackupRecord[];
+  }>;
+}
+
+/** Options for `dumpCellStateForBackup`. */
+export interface DumpCellStateOptions {
+  adminWebsocket: AdminWebsocketLike;
+  /** Cell id as a 2-tuple: [dna_hash, agent_pub_key] (uint8arrays per Holochain client convention). */
+  cellId: [Uint8Array, Uint8Array];
+  /** Filter source-chain records to those authored by this agent. */
+  agentPubKey: Uint8Array;
+  /** Human-friendly role name written into the payload. */
+  roleName: string;
+  /**
+   * Decoder called once per kept record. Returns the human_readable view.
+   * The dev's match-on-entry-type lives here. Errors are caught and the record's
+   * human_readable becomes a `{_warning, error}` blob so backup keeps going.
+   */
+  decodeRecordForExport: (
+    entryType: string,
+    entryBytesB64: string,
+  ) => Promise<unknown>;
+}
+
+/** Result of `dumpCellStateForBackup`. */
+export interface DumpCellStateResult {
+  records: BackupRecord[];
+  summary: BackupSummary;
+}
+
+/**
+ * Convert a Uint8Array agent_pub_key into the standard `uhCAk...` base64 string.
+ * Pure helper — no Holochain imports needed.
+ */
+function agentPubKeyToString(bytes: Uint8Array): string {
+  // Holochain agent key encoding: "uhCAk" prefix + base64-of-bytes (last 3 bytes
+  // are the location hash). We just use base64 standard, mirroring the conductor.
+  if (typeof Buffer !== 'undefined') {
+    return 'uhCAk' + Buffer.from(bytes).toString('base64');
+  }
+  // Browser fallback
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return 'uhCAk' + btoa(s);
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * Capture this user's source chain on the given cell as a list of
+ * `BackupRecord`s ready to embed in a `BackupPayload.cells[]` entry.
+ *
+ * The user's authored records are filtered by `agentPubKey`. The decoder is
+ * called once per kept record to populate the `human_readable` view; decoder
+ * errors are caught (record keeps `_warning: "decode_failed"` instead).
+ */
+export async function dumpCellStateForBackup(
+  options: DumpCellStateOptions,
+): Promise<DumpCellStateResult> {
+  const dump = await options.adminWebsocket.dumpFullState({
+    cell_id: options.cellId,
+  });
+
+  const records: BackupRecord[] = [];
+  const counts: Record<string, number> = {};
+
+  for (const raw of dump.source_chain_dump.records) {
+    // Filter to the caller's own authored records.
+    const author = raw.action.author;
+    if (!(author instanceof Uint8Array)) continue;
+    if (!bytesEqual(author, options.agentPubKey)) continue;
+
+    // Pull entry_type + entry bytes (may be undefined — e.g. some action types
+    // have no payload, like Delete or some Update variants).
+    const entryEnvelope = raw.entry;
+    if (!entryEnvelope) continue;
+    const entryType = entryEnvelope.entry_type || raw.action.type;
+    let entryB64: string;
+    if (typeof entryEnvelope.entry === 'string') {
+      entryB64 = entryEnvelope.entry;
+    } else if (entryEnvelope.entry instanceof Uint8Array) {
+      entryB64 = uint8ToBase64(entryEnvelope.entry);
+    } else {
+      // No entry payload to decode — skip.
+      continue;
+    }
+
+    // Run the dev's decoder; tolerate failure.
+    let human: unknown;
+    try {
+      human = await options.decodeRecordForExport(entryType, entryB64);
+    } catch (e) {
+      human = {
+        _warning: 'decode_failed',
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+
+    const actionAddress = raw.action_address;
+    const actionHashStr =
+      actionAddress instanceof Uint8Array ? 'uhCkk' + uint8ToBase64(actionAddress) : String(actionAddress);
+
+    records.push({
+      entryType,
+      actionHash: actionHashStr,
+      createdAtMs: typeof raw.action.timestamp === 'number' ? raw.action.timestamp : 0,
+      human_readable: human,
+      raw_record: {
+        action: raw.action,
+        action_address: raw.action_address,
+        signature: raw.signature,
+        entry_b64: entryB64,
+      },
+      cellRoleName: options.roleName,
+    });
+    counts[entryType] = (counts[entryType] ?? 0) + 1;
+  }
+
+  return {
+    records,
+    summary: {
+      countsByEntryType: counts,
+      totalRecords: records.length,
+    },
+  };
+}
+
+/** Options for `restoreFromVault`. */
+export interface RestoreFromVaultOptions {
+  clientId: string;
+  /**
+   * Called once per record from the backup. Implementations typically dispatch
+   * by entryType to the appropriate zome function via the app's own Tauri
+   * command (e.g. `invoke("restore_record", { entryType, entryB64 })`).
+   */
+  dispatcher: (record: BackupRecord) => Promise<void>;
+  /** Optional progress callback (current, total). */
+  onProgress?: (current: number, total: number) => void;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  ipcUrl?: string;
+  /** Backup label to restore. Default: 'latest'. */
+  label?: string;
+}
+
+/** Result of `restoreFromVault`. */
+export interface RestoreFromVaultResult {
+  totalRecords: number;
+  succeeded: number;
+  failed: Array<{ record: BackupRecord; error: string }>;
+}
+
+// Module-level guard to detect overlapping `restoreFromVault` calls.
+const _restoresInProgress: Set<string> = new Set();
+
+/**
+ * Restore an app's data from its Vault backup by walking the canonical
+ * payload and calling `dispatcher` once per record. The dispatcher decides
+ * how to re-create each entry (typically a zome call inside a Tauri command).
+ *
+ * Per-record dispatcher failures are caught; the function continues through
+ * the rest of the records and surfaces failures in the returned result.
+ */
+export async function restoreFromVault(
+  options: RestoreFromVaultOptions,
+): Promise<RestoreFromVaultResult> {
+  if (_restoresInProgress.has(options.clientId)) {
+    throw new RestoreInProgressError();
+  }
+  _restoresInProgress.add(options.clientId);
+
+  try {
+    const backup = await retrieveFromVault({
+      clientId: options.clientId,
+      label: options.label,
+      ipcUrl: options.ipcUrl,
+    });
+    if (!backup) {
+      return { totalRecords: 0, succeeded: 0, failed: [] };
+    }
+
+    // Canonical-shape: walk cells[].records[].
+    const payload = backup.data as Partial<BackupPayload> | undefined;
+    const cells = payload?.cells ?? [];
+    const allRecords: BackupRecord[] = [];
+    for (const cell of cells) {
+      for (const r of cell.records ?? []) allRecords.push(r);
+    }
+
+    const failed: RestoreFromVaultResult['failed'] = [];
+    let succeeded = 0;
+    for (let i = 0; i < allRecords.length; i++) {
+      const r = allRecords[i];
+      try {
+        await options.dispatcher(r);
+        succeeded++;
+      } catch (e) {
+        failed.push({
+          record: r,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+      options.onProgress?.(i + 1, allRecords.length);
+    }
+
+    return { totalRecords: allRecords.length, succeeded, failed };
+  } finally {
+    _restoresInProgress.delete(options.clientId);
+  }
+}
+
+/** Options for the new (v2.4.0+) signature of `startAutoBackup`. */
+export interface FlowstaAutoBackupConfigV2 {
+  clientId: string;
+  appName: string;
+  adminWebsocket: AdminWebsocketLike;
+  /** Single cell id today (v2.4.0). Multi-cell can grow into an array later without breaking the payload shape. */
+  cellId: [Uint8Array, Uint8Array];
+  cellRoleName: string;
+  /** Filter source-chain records to this agent. */
+  agentPubKey: Uint8Array;
+  decodeRecordForExport: (
+    entryType: string,
+    entryBytesB64: string,
+  ) => Promise<unknown>;
+  /** Backup after each write (debounced). Default: true. */
+  triggerOnWrite?: boolean;
+  /** Debounce window for write-triggered backups, in seconds. Default: 30. */
+  debounceSeconds?: number;
+  /** Heartbeat interval, in minutes. 0 disables. Default: 30. */
+  heartbeatMinutes?: number;
+  /** Backup label. Default: 'latest' (overwrites). */
+  label?: string;
+  /** Vault IPC URL. Default: 'http://127.0.0.1:27777'. */
+  ipcUrl?: string;
+  onSuccess?: (result: FlowstaBackupResult) => void;
+  onError?: (error: Error) => void;
+}
+
+/** Controller returned by the v2 `startAutoBackup` signature. */
+export interface AutoBackupController {
+  /** Schedule a write-triggered backup. Debounced internally. */
+  triggerBackupSoon(): void;
+  /** Stop all backup timers. Idempotent. */
+  stop(): void;
+}
+
+function isAutoBackupConfigV2(
+  config: FlowstaAutoBackupConfig | FlowstaAutoBackupConfigV2,
+): config is FlowstaAutoBackupConfigV2 {
+  return (config as FlowstaAutoBackupConfigV2).adminWebsocket !== undefined;
+}
+
+/**
+ * Build a canonical `BackupPayload` from a single-cell dump.
+ * Exported so apps can serialise to file (debug) without going through Vault.
+ */
+export async function buildBackupPayload(
+  config: FlowstaAutoBackupConfigV2,
+): Promise<BackupPayload> {
+  const result = await dumpCellStateForBackup({
+    adminWebsocket: config.adminWebsocket,
+    cellId: config.cellId,
+    agentPubKey: config.agentPubKey,
+    roleName: config.cellRoleName,
+    decodeRecordForExport: config.decodeRecordForExport,
+  });
+
+  return {
+    version: 1,
+    _readme: `Your ${config.appName} data. Backed up automatically by Flowsta Vault. Encrypted with your device key at rest; only you can read it. Each record below carries a human-readable view of what you authored AND a signed Holochain record for restore.`,
+    license: 'Cryptographic Autonomy License v1.0 (CAL-1.0)',
+    app: { name: config.appName, client_id: config.clientId },
+    agent_pub_key: agentPubKeyToString(config.agentPubKey),
+    exported_at_iso: new Date().toISOString(),
+    _summary: result.summary,
+    cells: [
+      {
+        role_name: config.cellRoleName,
+        _readme:
+          "Each record below is one thing you did. `human_readable` is the plain-English view of the entry. `raw_record` is the cryptographically signed Holochain record that lets any compatible app verify and restore it.",
+        records: result.records,
+      },
+    ],
+  };
+}
+
+/**
+ * v2.4.0+ overload — schedules write-triggered + heartbeat auto-backups.
+ *
+ * Returns an `AutoBackupController` with `triggerBackupSoon()` (call this from
+ * zome-write success handlers) and `stop()` (call on sign-out / unmount).
+ *
+ * The original `getData`-based signature still works for backwards compat.
+ */
+export function startAutoBackup(
+  config: FlowstaAutoBackupConfigV2,
+): AutoBackupController;
+export function startAutoBackup(config: FlowstaAutoBackupConfig): () => void;
+export function startAutoBackup(
+  config: FlowstaAutoBackupConfig | FlowstaAutoBackupConfigV2,
+): AutoBackupController | (() => void) {
+  if (!isAutoBackupConfigV2(config)) {
+    return startAutoBackupLegacy(config);
+  }
+
+  const v2 = config;
+  const debounceMs = (v2.debounceSeconds ?? 30) * 1000;
+  const heartbeatMs = (v2.heartbeatMinutes ?? 30) * 60 * 1000;
+  const triggerOnWrite = v2.triggerOnWrite ?? true;
+
+  let stopped = false;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let lastBackupAt = 0;
+  let writesSinceLastBackup = 0;
+
+  const doBackup = async () => {
+    if (stopped) return;
+    try {
+      const status = await getVaultStatus(v2.ipcUrl);
+      if (!status.running) return;
+      const payload = await buildBackupPayload(v2);
+      const result = await backupToVault(
+        {
+          clientId: v2.clientId,
+          appName: v2.appName,
+          label: v2.label,
+          ipcUrl: v2.ipcUrl,
+        },
+        payload,
+      );
+      lastBackupAt = Date.now();
+      writesSinceLastBackup = 0;
+      v2.onSuccess?.(result);
+    } catch (err) {
+      v2.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  const controller: AutoBackupController = {
+    triggerBackupSoon() {
+      if (stopped) return;
+      if (!triggerOnWrite) return;
+      writesSinceLastBackup++;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(doBackup, debounceMs);
+    },
+    stop() {
+      stopped = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    },
+  };
+
+  if (heartbeatMs > 0) {
+    heartbeatTimer = setInterval(() => {
+      if (stopped) return;
+      // Heartbeat: only run if there's been a write since the last backup,
+      // or if no backup has ever happened in this session.
+      if (writesSinceLastBackup === 0 && lastBackupAt > 0) return;
+      doBackup();
+    }, heartbeatMs);
+  }
+
+  // Initial backup on startup.
+  doBackup();
+
+  return controller;
+}
+
+/** Original (v2.3.0) signature, preserved for backwards compatibility. */
+function startAutoBackupLegacy(config: FlowstaAutoBackupConfig): () => void {
+  const intervalMs = (config.intervalMinutes ?? 60) * 60 * 1000;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let stopped = false;
+
+  const doBackup = async () => {
+    if (stopped) return;
+    try {
+      const status = await getVaultStatus(config.ipcUrl);
+      if (!status.running) return;
+      const data = await config.getData();
+      const result = await backupToVault(
+        {
+          clientId: config.clientId,
+          appName: config.appName,
+          label: config.label,
+          ipcUrl: config.ipcUrl,
+        },
+        data,
+      );
+      config.onSuccess?.(result);
+    } catch (err) {
+      config.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  doBackup();
+  if (intervalMs > 0) timer = setInterval(doBackup, intervalMs);
+
+  return () => {
+    stopped = true;
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
 }
