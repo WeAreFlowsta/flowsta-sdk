@@ -837,42 +837,6 @@ export async function listVaultBackups(
   }
 }
 
-/**
- * Try to retrieve the latest backup from the user's Vault and return it only
- * if it includes lair recovery fields. Returns `null` if Vault is unavailable,
- * the app isn't linked, no backup exists, or the latest backup is data-only
- * (older format without lair fields).
- *
- * Host apps call this at startup BEFORE initialising lair, then hand the
- * returned `lair_*` fields to a small Tauri/Rust command that writes them to
- * the lair data directory. After lair starts against the recovered files,
- * `install_app` with the original agent_key + `ignore_genesis_failure: true`,
- * then `admin.graft_records(cell_id, true, decoded_records)` to rebuild the
- * source chain. The result is the same agent, same chain, no DHT duplicates.
- *
- * For the full integration pattern see docs.flowsta.com/vault/holochain-apps.
- */
-export async function retrieveLairRecoveryPayload(options: {
-  clientId: string;
-  ipcUrl?: string;
-}): Promise<BackupPayload | null> {
-  const result = await retrieveFromVault({
-    clientId: options.clientId,
-    ipcUrl: options.ipcUrl,
-  });
-  if (!result) return null;
-  const payload = result.data as Partial<BackupPayload> | null;
-  if (
-    !payload ||
-    typeof payload.lair_passphrase !== 'string' ||
-    typeof payload.lair_keystore_config !== 'string' ||
-    typeof payload.lair_keystore_data !== 'string'
-  ) {
-    return null;
-  }
-  return payload as BackupPayload;
-}
-
 // `startAutoBackup` is defined later in the file with both the v2.3.0 and
 // v2.4.0+ signatures via overloads. See the "Generic source-chain backup
 // helpers" section near the end of this file.
@@ -1141,14 +1105,14 @@ export interface BackupSummary {
 }
 
 /**
- * The three lair-keystore files needed to recover the user's signing identity
- * on a fresh install. Together they let any compatible Holochain conductor
- * import the user's existing agent key and operate as them — required for
- * full CAL §4.2.1 compliance and for the reinstall-recovery flow.
+ * The three lair-keystore files that make a backup CAL §4.2.1-complete: the
+ * user's data PLUS the cryptographic keys to operate it. Together they let any
+ * compatible Holochain conductor import the user's agent key and act as them,
+ * so the user's downloadable export is genuinely self-sufficient.
  *
  * The SDK runs in browser-context and has no file-system access, so reading
- * and writing these fields is the host app's responsibility — typically a
- * small Tauri command in Rust, or the Electron main process.
+ * these fields is the host app's responsibility — typically a small Tauri
+ * command in Rust, or the Electron main process.
  */
 export interface LairBackupFields {
   /** Plain-text passphrase that unlocks lair's `store_file`. ~32-char alphanumeric. */
@@ -1178,13 +1142,11 @@ export interface BackupPayload {
   }>;
 
   /**
-   * Optional: lair recovery fields. When present, this backup is sufficient
-   * for a fresh install to recover the user's signing identity and continue
-   * as the same agent on the DHT. When absent, the backup is data-only —
-   * useful for CAL data export but not for in-place reinstall recovery.
+   * Optional: lair key fields. When present, the backup carries the user's
+   * cryptographic keys alongside their data, making the downloadable export
+   * CAL §4.2.1-complete (data + keys). When absent, the backup is data-only.
    *
-   * See {@link LairBackupFields} for what each field is and who's responsible
-   * for reading/writing them.
+   * See {@link LairBackupFields} for what each field is and who reads them.
    */
   lair_passphrase?: string;
   lair_keystore_config?: string;
