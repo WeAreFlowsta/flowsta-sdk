@@ -175,6 +175,14 @@ if (ours && ours.backupCount > 0 && /* local source chain is empty */) {
 
 On the Rust side, `restore_record` is the symmetric `match` — decode the entry, then call the matching zome function.
 
+### CAL-complete backups: data + keys _(2.4.3+)_
+
+A canonical `BackupPayload` can optionally carry the user's lair-keystore key material alongside their records, via three fields — `lair_passphrase`, `lair_keystore_config`, and `lair_keystore_data` (see the `LairBackupFields` type). When present, the backup is **CAL §4.2.1-complete**: it holds the user's _data plus the cryptographic keys to operate it_, so the downloadable export is self-sufficient on any compatible Holochain conductor — no lock-in.
+
+The SDK runs in browser context with no file-system access, so reading these three lair files is the **host app's** job — typically a small Tauri command in Rust (or the Electron main process). When the fields are absent, the backup is data-only.
+
+> These fields exist for **portability**, not auto-restore. In practice a user recovers their identity from their 24-word recovery phrase and their on-network data re-syncs from the DHT; the lair material makes the _exported file_ independently complete, as CAL requires.
+
 ### `dumpCellStateForBackup(options)` _(2.4.0+)_
 
 Build a canonical-shape `records[]` array from a Holochain admin `dumpFullState` call. Used internally by `startAutoBackup`'s v2.4 signature; exposed so apps can serialise to file (debug) or transform before posting:
