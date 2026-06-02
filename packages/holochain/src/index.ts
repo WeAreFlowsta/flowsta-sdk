@@ -1104,25 +1104,6 @@ export interface BackupSummary {
   totalRecords: number;
 }
 
-/**
- * The three lair-keystore files that make a backup CAL §4.2.1-complete: the
- * user's data PLUS the cryptographic keys to operate it. Together they let any
- * compatible Holochain conductor import the user's agent key and act as them,
- * so the user's downloadable export is genuinely self-sufficient.
- *
- * The SDK runs in browser-context and has no file-system access, so reading
- * these fields is the host app's responsibility — typically a small Tauri
- * command in Rust, or the Electron main process.
- */
-export interface LairBackupFields {
-  /** Plain-text passphrase that unlocks lair's `store_file`. ~32-char alphanumeric. */
-  lair_passphrase: string;
-  /** Full text content of `lair-keystore-config.yaml`. Contains crypto salts that MUST pair with the store_file — re-running `lair-keystore init` would generate a new config with new salts and break decryption. */
-  lair_keystore_config: string;
-  /** Base64 of the encrypted `store_file` bytes (lair's SQLCipher database). */
-  lair_keystore_data: string;
-}
-
 /** Canonical backup payload posted to Vault. */
 export interface BackupPayload {
   version: 1;
@@ -1140,17 +1121,6 @@ export interface BackupPayload {
     _readme: string;
     records: BackupRecord[];
   }>;
-
-  /**
-   * Optional: lair key fields. When present, the backup carries the user's
-   * cryptographic keys alongside their data, making the downloadable export
-   * CAL §4.2.1-complete (data + keys). When absent, the backup is data-only.
-   *
-   * See {@link LairBackupFields} for what each field is and who reads them.
-   */
-  lair_passphrase?: string;
-  lair_keystore_config?: string;
-  lair_keystore_data?: string;
 }
 
 /** Options for `dumpCellStateForBackup`. */

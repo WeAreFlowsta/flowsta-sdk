@@ -175,13 +175,13 @@ if (ours && ours.backupCount > 0 && /* local source chain is empty */) {
 
 On the Rust side, `restore_record` is the symmetric `match` — decode the entry, then call the matching zome function.
 
-### CAL-complete backups: data + keys _(2.4.3+)_
+### CAL §4.2.1 — keys come from the Vault, not the backup _(2.4.0+)_
 
-A canonical `BackupPayload` can optionally carry the user's lair-keystore key material alongside their records, via three fields — `lair_passphrase`, `lair_keystore_config`, and `lair_keystore_data` (see the `LairBackupFields` type). When present, the backup is **CAL §4.2.1-complete**: it holds the user's _data plus the cryptographic keys to operate it_, so the downloadable export is self-sufficient on any compatible Holochain conductor — no lock-in.
+A `BackupPayload` carries **data only**. It does not — and should not — carry the user's cryptographic keys: their identity lives in their Flowsta Vault, and your app never holds the key material.
 
-The SDK runs in browser context with no file-system access, so reading these three lair files is the **host app's** job — typically a small Tauri command in Rust (or the Electron main process). When the fields are absent, the backup is data-only.
+CAL §4.2.1 (the user's data **plus** the keys to operate it) is satisfied at the Vault level. The Vault's "Export All Data" bundles the user's data **plus the device seed** — the key material their 24-word recovery phrase derives — so the export is self-sufficient: they can re-derive their identity on any compatible Holochain conductor and use their data, with no lock-in.
 
-> These fields exist for **portability**, not auto-restore. In practice a user recovers their identity from their 24-word recovery phrase and their on-network data re-syncs from the DHT; the lair material makes the _exported file_ independently complete, as CAL requires.
+To get a user's data back on a new device the recommended path is **recognition**: they sign in with their Flowsta identity, the Vault recognises their agent set, and their on-network data re-syncs from the DHT — no replay or key import. (`restoreFromVault` above remains available if your app wants to explicitly replay its backed-up records onto a fresh source chain instead.)
 
 ### `dumpCellStateForBackup(options)` _(2.4.0+)_
 
