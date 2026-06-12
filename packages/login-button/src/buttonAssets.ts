@@ -14,6 +14,8 @@
  * ```
  */
 
+import { BUTTON_DATA_URIS } from './buttonDataUris.js';
+
 export type ButtonTheme = 'dark' | 'light' | 'neutral';
 export type ButtonShape = 'pill' | 'rectangle';
 
@@ -25,16 +27,11 @@ export type ButtonShape = 'pill' | 'rectangle';
  * @returns URL to button SVG
  */
 export function getButtonUrl(theme: ButtonTheme, shape: ButtonShape): string {
-  const filename = `flowsta_signin_web_${theme}_${shape}.svg`;
-  
-  // Try to use Vite's asset import (will be resolved at build time)
-  try {
-    // @ts-ignore - Vite will handle this
-    return new URL(`./assets/svg/${filename}`, import.meta.url).href;
-  } catch {
-    // Fallback to CDN (for non-bundler environments)
-    return `https://unpkg.com/@flowsta/login-button@latest/assets/svg/${filename}`;
-  }
+  // Inline data URI — works in every framework, bundler, script-tag, and
+  // SSR context. The previous new URL(import.meta.url) approach compiled
+  // to an empty glob map in the built package (assets live outside src/),
+  // and /node_modules/... paths 404 in production bundles.
+  return BUTTON_DATA_URIS[`${theme}-${shape}`];
 }
 
 /**

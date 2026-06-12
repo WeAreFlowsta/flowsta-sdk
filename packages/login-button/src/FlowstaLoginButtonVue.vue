@@ -24,6 +24,7 @@
 import { ref, computed } from 'vue';
 import type { VueFlowstaLoginButtonProps, FlowstaLoginSuccess, FlowstaLoginError } from './types.js';
 import { buildAuthorizationUrl } from './utils/oauth.js';
+import { BUTTON_DATA_URIS } from './buttonDataUris.js';
 
 /**
  * Flowsta Login Button component for Vue 3
@@ -57,8 +58,7 @@ const emit = defineEmits<{
 const isLoading = ref(false);
 
 const imagePath = computed(() => {
-  const imageName = `flowsta_signin_web_${props.variant.replace('-', '_')}`;
-  return `/node_modules/@flowsta/login-button/assets/svg/${imageName}.svg`;
+  return BUTTON_DATA_URIS[props.variant] || BUTTON_DATA_URIS['dark-pill'];
 });
 
 const buttonStyle = computed(() => ({

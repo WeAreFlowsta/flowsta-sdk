@@ -4,6 +4,7 @@
 
 import type { FlowstaLoginConfig, FlowstaLoginSuccess, FlowstaLoginError } from './types.js';
 import { buildAuthorizationUrl } from './utils/oauth.js';
+import { BUTTON_DATA_URIS } from './buttonDataUris.js';
 
 export interface FlowstaLoginButtonVanillaOptions extends FlowstaLoginConfig {
   /** Callback when login succeeds */
@@ -74,8 +75,7 @@ export function createFlowstaLoginButton(
 
   // Create image element
   const img = document.createElement('img');
-  const imageName = `flowsta_signin_web_${variant.replace('-', '_')}`;
-  img.src = `/node_modules/@flowsta/login-button/assets/svg/${imageName}.svg`;
+  img.src = BUTTON_DATA_URIS[variant] || BUTTON_DATA_URIS['dark-pill'];
   img.alt = 'Sign in with Flowsta';
   img.width = 175;
   img.height = 40;

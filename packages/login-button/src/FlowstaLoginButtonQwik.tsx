@@ -6,6 +6,7 @@
 import { component$, useSignal, $, type JSXOutput } from '@builder.io/qwik';
 import type { FlowstaLoginConfig, FlowstaLoginSuccess, FlowstaLoginError } from './types.js';
 import { buildAuthorizationUrl } from './utils/oauth.js';
+import { BUTTON_DATA_URIS } from './buttonDataUris.js';
 
 export interface FlowstaLoginButtonQwikProps extends FlowstaLoginConfig {
   /** Callback when login succeeds */
@@ -92,12 +93,9 @@ export const FlowstaLoginButton = component$<FlowstaLoginButtonQwikProps>((props
     }
   });
 
-  // Get button image path based on variant
-  const getImagePath = (variant: string): string => {
-    const imageName = `flowsta_signin_web_${variant.replace('-', '_')}`;
-    // For bundled use, assume assets are in the package
-    return `/node_modules/@flowsta/login-button/assets/svg/${imageName}.svg`;
-  };
+  // Inline data URI — asset paths break in production bundles.
+  const getImagePath = (variant: string): string =>
+    BUTTON_DATA_URIS[variant] || BUTTON_DATA_URIS['dark-pill'];
 
   return (
     <button
