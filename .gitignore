@@ -45,3 +45,4 @@ coverage/
 secrets.*
 credentials.*
 
+packages/login-button/*.tgz
