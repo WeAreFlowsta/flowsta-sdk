@@ -420,3 +420,17 @@ MIT © Flowsta
 
 **Made with ❤️ by the Flowsta team**
 
+
+## Changelog
+
+### 0.1.4 (2026-06-13)
+- **Fixed: button images broke in production builds.** All framework
+  variants previously resolved the button artwork via paths that only
+  exist in dev environments. The official artwork is now inlined as
+  optimized data URIs (~7 KB gzipped total) — works with every bundler,
+  plain `<script>` tags, and SSR, with no CDN dependency.
+- Button SVG assets optimized (69% smaller).
+
+### 0.1.3
+- Initial public release: React, Vue, Qwik, and vanilla JS components
+  with PKCE and state handling.
