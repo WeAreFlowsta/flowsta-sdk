@@ -1013,6 +1013,121 @@ export async function signDocument(
   }
 }
 
+export interface AuthenticateWithVaultResult {
+  /** Ed25519 signature over the challenge (base64). */
+  signature: string;
+  /** The signer's Holochain agent key (uhCAk…). */
+  agentPubKey: string;
+  /** The signer's DID (did:flowsta:…). */
+  did: string;
+}
+
+export interface AuthenticateWithVaultOptions {
+  ipcUrl?: string;
+  /** App name shown in the Vault approval dialog. */
+  appName?: string;
+  /** Human-readable reason shown in the approval dialog. */
+  reason?: string;
+}
+
+/**
+ * Sign a Flowsta auth challenge with the local Vault's device key
+ * ("Sign in with your Vault" — R1 Track E). Browser-safe: plain `fetch`,
+ * no dependencies. The user approves in a Vault dialog (~60s).
+ *
+ * Pass the challenge string EXACTLY as issued by
+ * `POST /auth/vault/challenge` (a `flowsta-auth-challenge:v1:…` string).
+ * Post the returned `signature` + `agentPubKey` back to
+ * `POST /auth/vault/token` to obtain a session.
+ *
+ * ⚠️ Encoding contract (do not "simplify"): the auth-api verifies the
+ * signature over the challenge string's UTF-8 bytes, but Vault's
+ * `/authenticate` base64-DECODES its `challenge` field before signing.
+ * So we base64-encode the challenge's UTF-8 bytes here; Vault decodes
+ * back to those exact bytes and signs them. Sending the raw string would
+ * make Vault sign the base64-decode of the string (garbage) and the
+ * server verification would fail.
+ *
+ * Desktop + Chromium only for now: the call targets `http://127.0.0.1`
+ * from an HTTPS page; Chromium exempts loopback from mixed-content
+ * blocking, Firefox/Safari are unreliable (ship a fallback — E2).
+ */
+export async function authenticateWithVault(
+  challenge: string,
+  options: AuthenticateWithVaultOptions = {},
+): Promise<AuthenticateWithVaultResult> {
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  // Status pre-check (fast) so we surface locked/absent before the long call.
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const statusResponse = await fetch(`${ipcUrl}/status`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!statusResponse.ok) throw new VaultNotFoundError();
+    const status = await statusResponse.json();
+    if (!status.unlocked) throw new VaultLockedError();
+  } catch (err) {
+    if (err instanceof FlowstaHolochainError) throw err;
+    throw new VaultNotFoundError();
+  }
+
+  // base64(challenge UTF-8 bytes) — see the encoding contract above.
+  const challengeBytes = new TextEncoder().encode(challenge);
+  let binary = '';
+  for (const b of challengeBytes) binary += String.fromCharCode(b);
+  const challengeB64 = btoa(binary);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 75000); // 75s > Vault's 60s approval dialog
+
+  try {
+    const response = await fetch(`${ipcUrl}/authenticate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        app_name: options.appName || 'Sign in with Flowsta',
+        challenge: challengeB64,
+        reason: options.reason || 'Sign in',
+      }),
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const error = data.error || 'unknown_error';
+      if (error === 'vault_locked') throw new VaultLockedError();
+      if (error === 'user_denied') throw new UserDeniedError();
+      throw new FlowstaHolochainError(
+        data.description || `Vault authentication failed: ${error}`,
+        error,
+        data.description,
+      );
+    }
+
+    const data = await response.json();
+    if (!data.signature) {
+      throw new FlowstaHolochainError('Vault returned no signature', 'no_signature');
+    }
+    return {
+      signature: data.signature,
+      agentPubKey: data.agent_pub_key,
+      did: data.did,
+    };
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof FlowstaHolochainError) throw err;
+    if ((err as Error).name === 'AbortError') {
+      throw new FlowstaHolochainError(
+        'Vault authentication timed out. The user may not have responded.',
+        'timeout',
+      );
+    }
+    throw new VaultNotFoundError();
+  }
+}
+
 /**
  * Check if the Vault has document signing capability (signing DNA installed).
  *
