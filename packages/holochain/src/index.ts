@@ -1165,6 +1165,104 @@ export async function getSigningStatus(
   }
 }
 
+// ── Relay login (R2 Track F4) ───────────────────────────────────────
+//
+// For browsers that cannot reach a local Vault over the 127.0.0.1
+// loopback: phones (no Vault on the device) and Firefox/Safari desktop
+// (mixed-content blocks the loopback). The browser and the user's
+// desktop Vault meet at the auth-api:
+//
+//   1. startRelayLogin() -> the API mints a short user code
+//   2. show the code (phone: user types it into their desktop Vault;
+//      desktop non-Chromium: openVaultDeepLink() hands it to Vault via
+//      flowsta:// — ALWAYS render the typed-code fallback too, deep-link
+//      success is not detectable from the page)
+//   3. the user approves in Vault; poll() resolves with the session
+//
+// Protocol: build-docs/current/R2_RELAY_LOGIN_PROTOCOL.md (private).
+
+export type RelayStatus = 'pending' | 'claimed' | 'approved' | 'denied' | 'expired';
+
+export interface RelayPollResult {
+  status: RelayStatus;
+  /** Present exactly once, when status === 'approved'. */
+  token?: string;
+  user?: any;
+}
+
+export interface RelayLoginSession {
+  /** Display code for the user, formatted XXXX-XXXX. */
+  userCode: string;
+  /** Seconds until the code expires (typically 300). */
+  expiresIn: number;
+  /**
+   * Poll the relay once (call every 2-3 seconds). The token is returned
+   * exactly once; treat 'expired' after an 'approved' as already-consumed.
+   * Sends credentials so the API can set the SSO cookie on approval.
+   */
+  poll: () => Promise<RelayPollResult>;
+}
+
+/**
+ * Start a relay login: mint a user code another device's Vault can claim
+ * and approve. `clientLabel` is bound into the signed challenge — pass a
+ * short label like 'flowsta' (NOT an OAuth client_id; the API caps this
+ * field at 64 chars).
+ */
+export async function startRelayLogin(
+  apiUrl: string,
+  options: { clientLabel?: string } = {},
+): Promise<RelayLoginSession> {
+  const base = apiUrl.replace(/\/$/, '');
+  const startResponse = await fetch(`${base}/auth/relay/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ client_id: options.clientLabel || 'flowsta' }),
+  });
+  if (!startResponse.ok) {
+    const data = await startResponse.json().catch(() => ({}));
+    throw new FlowstaHolochainError(
+      data.message || 'Could not start a relay sign-in',
+      data.error || 'relay_start_failed',
+    );
+  }
+  const started = await startResponse.json();
+  const relayId: string = started.relay_id;
+
+  return {
+    userCode: started.user_code,
+    expiresIn: started.expires_in,
+    poll: async () => {
+      const pollResponse = await fetch(`${base}/auth/relay/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ relay_id: relayId }),
+      });
+      if (!pollResponse.ok) {
+        const data = await pollResponse.json().catch(() => ({}));
+        throw new FlowstaHolochainError(
+          data.message || 'Relay poll failed',
+          data.error || 'relay_poll_failed',
+        );
+      }
+      return (await pollResponse.json()) as RelayPollResult;
+    },
+  };
+}
+
+/**
+ * Hand a relay code to a locally-installed Vault via the flowsta://
+ * deep link (Firefox/Safari desktop path). Fire-and-forget: there is NO
+ * way to detect whether the link was handled — always show the typed-code
+ * fallback alongside ("Vault didn't open? Enter this code in your Vault").
+ */
+export function openVaultDeepLink(userCode: string): void {
+  const code = encodeURIComponent(userCode);
+  window.location.href = `flowsta://relay/v1?code=${code}`;
+}
+
 // ── Generic source-chain backup helpers (v2.4.0+) ──────────────────
 //
 // Replaces the per-app `get_export_data` pattern with a generic
