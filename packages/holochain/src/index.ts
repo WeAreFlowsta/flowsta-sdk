@@ -1032,7 +1032,7 @@ export interface AuthenticateWithVaultOptions {
 
 /**
  * Sign a Flowsta auth challenge with the local Vault's device key
- * ("Sign in with your Vault" — R1 Track E). Browser-safe: plain `fetch`,
+ * ("Sign in with your Vault"). Browser-safe: plain `fetch`,
  * no dependencies. The user approves in a Vault dialog (~60s).
  *
  * Pass the challenge string EXACTLY as issued by
@@ -1165,7 +1165,7 @@ export async function getSigningStatus(
   }
 }
 
-// ── Relay login (R2 Track F4) ───────────────────────────────────────
+// ── Relay login ─────────────────────────────────────────────────────
 //
 // For browsers that cannot reach a local Vault over the 127.0.0.1
 // loopback: phones (no Vault on the device) and Firefox/Safari desktop
@@ -1179,7 +1179,6 @@ export async function getSigningStatus(
 //      success is not detectable from the page)
 //   3. the user approves in Vault; poll() resolves with the session
 //
-// Protocol: build-docs/current/R2_RELAY_LOGIN_PROTOCOL.md (private).
 
 export type RelayStatus = 'pending' | 'claimed' | 'approved' | 'denied' | 'expired';
 
@@ -1270,7 +1269,6 @@ export function openVaultDeepLink(userCode: string): void {
 // human_readable view (decoded entry, for the user's CAL §4.2.1 export)
 // AND a raw_record view (signed Holochain record, for restore).
 //
-// See build-docs/current/GENERIC_BACKUP_PLAN.md.
 
 /** Minimal subset of @holochain/client AdminWebsocket needed for backup. */
 export interface AdminWebsocketLike {
