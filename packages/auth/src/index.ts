@@ -243,15 +243,22 @@ export class FlowstaAuth {
       throw new Error('No authorization code received');
     }
 
-    // Verify state (CSRF protection)
+    // Verify state (CSRF protection). Flows started by this SDK's login()
+    // store under flowsta_state; flows started by a @flowsta/login-button
+    // component store under flowsta_oauth_state — accept either, so the
+    // button and this SDK compose out of the box.
     const state = params.get('state');
-    const storedState = sessionStorage.getItem('flowsta_state');
+    const storedState =
+      sessionStorage.getItem('flowsta_state') ??
+      sessionStorage.getItem('flowsta_oauth_state');
     if (!state || state !== storedState) {
       throw new Error('Invalid state parameter - possible CSRF attack');
     }
 
-    // Get PKCE verifier
-    const codeVerifier = sessionStorage.getItem('flowsta_code_verifier');
+    // Get PKCE verifier — ours, or the login-button's state-scoped key.
+    const codeVerifier =
+      sessionStorage.getItem('flowsta_code_verifier') ??
+      sessionStorage.getItem(`flowsta_code_verifier_${state}`);
     if (!codeVerifier) {
       throw new Error('Missing PKCE code verifier');
     }
@@ -276,9 +283,11 @@ export class FlowstaAuth {
 
     const { access_token, refresh_token } = await tokenResponse.json();
 
-    // Clean up PKCE storage
+    // Clean up PKCE storage — both this SDK's keys and the login-button's.
     sessionStorage.removeItem('flowsta_code_verifier');
     sessionStorage.removeItem('flowsta_state');
+    sessionStorage.removeItem('flowsta_oauth_state');
+    sessionStorage.removeItem(`flowsta_code_verifier_${state}`);
 
     // Fetch user info
     const userResponse = await fetch(`${this.config.apiUrl}/oauth/userinfo`, {
