@@ -210,8 +210,8 @@ const auth = new FlowstaAuth({
 | `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally |
 | `getLinkedAgents(agentPubKey?)` | `Promise<string[]>` | Get agents linked to current user or a specific agent |
 | `areAgentsLinked(agentA, agentB)` | `Promise<boolean>` | Check if two agents are linked |
-| `signFile(options)` | `Promise<SignResult>` | Sign a file hash (requires `sign` scope). The file is never uploaded. |
-| `signBatch(options)` | `Promise<SignBatchResult>` | Sign multiple hashes in one request |
+| `signFile(options)` | `Promise<SignResult>` | Sign a file hash (requires `sign` scope). Signs through Flowsta Vault when it's running (the user approves in the Vault); falls back to the API for legacy custodial accounts. Throws `VaultRequiredError` when neither can sign. The file is never uploaded. |
+| `signBatch(options)` | `Promise<SignBatchResult>` | Sign multiple hashes in one request (legacy custodial API only — with the Vault, call `signFile()` per file so the user approves each) |
 | `verifyFile(hash)` | `Promise<VerifyResult>` | Check if a hash has been signed. Public endpoint. |
 | `getContentRights(hash)` | `Promise<ContentRightsResult>` | Return just the declared content-rights for a hash |
 
@@ -226,14 +226,17 @@ const auth = new FlowstaAuth({
 ```typescript
 interface FlowstaUser {
   id: string;
-  email?: string;              // If 'email' scope was granted
+  email?: string;              // Legacy custodial accounts only — device-hosted
+                               // accounts (the norm) never expose an email; the
+                               // server stores only a hash. Ask the user if you
+                               // need one.
   username?: string;           // User's username (if set)
   displayName?: string;        // Display name
   profilePicture?: string;     // Profile picture URL
   agentPubKey?: string;        // Holochain agent public key
   did?: string;                // W3C Decentralized Identifier
   linkedAgents?: LinkedAgent[];// Linked agents (DHT-verified)
-  signingMode?: 'remote' | 'ipc'; // 'remote' = API, 'ipc' = Vault
+  signingMode?: 'remote' | 'ipc'; // Observed at sign-in; signFile() re-probes live
 }
 
 interface LinkedAgent {
@@ -264,7 +267,7 @@ This SDK uses **OAuth 2.0 Authorization Code Flow with PKCE**, which means:
 - ✅ No client secrets needed (safe for browser/mobile apps)
 - ✅ Authorization codes are protected by PKCE challenge
 - ✅ State parameter prevents CSRF attacks
-- ✅ Access and refresh tokens stored in `localStorage`
+- ✅ Access tokens stored in `localStorage`
 - ✅ PKCE verifiers stored in `sessionStorage` (cleared after use)
 
 ## Documentation

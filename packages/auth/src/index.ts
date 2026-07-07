@@ -31,7 +31,12 @@ export interface FlowstaAuthConfig {
 export interface FlowstaUser {
   /** User's unique ID */
   id: string;
-  /** User's email address (if 'email' scope was granted) */
+  /**
+   * User's email address. Only present when the 'email' scope was granted
+   * AND the account is legacy custodial. Device-hosted accounts (the norm)
+   * never expose an email — Flowsta's server stores only a hash. If your
+   * app needs an email address, ask the user for one directly.
+   */
   email?: string;
   /** User's username (if set) */
   username?: string;
@@ -45,7 +50,11 @@ export interface FlowstaUser {
   did?: string;
   /** Agents linked to this user (from DHT IsSamePersonEntry) */
   linkedAgents?: LinkedAgent[];
-  /** Current signing mode ('remote' = API, 'ipc' = Flowsta Vault) */
+  /**
+   * Signing mode observed at sign-in ('remote' = legacy custodial API,
+   * 'ipc' = Flowsta Vault). Informational only — signFile() re-probes the
+   * Vault live on every call, so this may be stale.
+   */
   signingMode?: 'remote' | 'ipc';
 }
 
@@ -67,6 +76,38 @@ export interface VaultDetectionResult {
   agentPubKey?: string;
   /** The vault agent's DID (if unlocked) */
   did?: string;
+}
+
+/** Base error for @flowsta/auth failures with a stable machine-readable code. */
+export class FlowstaAuthError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+  ) {
+    super(message);
+    this.name = 'FlowstaAuthError';
+  }
+}
+
+/**
+ * Signing requires Flowsta Vault. Thrown when the account has no
+ * server-side signing capability (device-hosted accounts — the norm) and
+ * the Vault isn't reachable on this machine. Tell the user to install or
+ * open Flowsta Vault: https://flowsta.com/vault
+ */
+export class VaultRequiredError extends FlowstaAuthError {
+  constructor(message = 'Signing requires the Flowsta Vault app. Ask the user to open (or install) Flowsta Vault and try again.') {
+    super(message, 'vault_required');
+    this.name = 'VaultRequiredError';
+  }
+}
+
+/** The user declined the request in the Flowsta Vault approval dialog. */
+export class UserDeniedError extends FlowstaAuthError {
+  constructor(message = 'The user declined the request in Flowsta Vault.') {
+    super(message, 'user_denied');
+    this.name = 'UserDeniedError';
+  }
 }
 
 export interface AuthState {
@@ -439,6 +480,17 @@ export class FlowstaAuth {
     const token = this.getAccessToken();
     if (!token) throw new Error('Not authenticated');
 
+    // Vault-first: signing keys live on the user's device. If Flowsta
+    // Vault is running here, sign through it — the user approves in the
+    // Vault UI and the key never leaves their machine.
+    const vault = await this.detectVault();
+    if (vault.running) {
+      return this.signFileViaVault(options);
+    }
+
+    // Legacy custodial path: the API signs inside the user's hosted cell.
+    // Device-hosted accounts (the norm) have no hosted cell, so a failure
+    // here means the user needs the Vault.
     const response = await fetch(`${this.config.apiUrl}/api/v1/sign-it/sign`, {
       method: 'POST',
       headers: {
@@ -453,9 +505,66 @@ export class FlowstaAuth {
       }),
     });
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || 'Signing failed');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (this.user?.signingMode !== 'remote' || response.status === 403 || response.status >= 500) {
+        throw new VaultRequiredError();
+      }
+      throw new FlowstaAuthError(data.message || 'Signing failed', data.error || 'signing_failed');
+    }
     return data;
+  }
+
+  /** Sign through the local Flowsta Vault (user approves in the Vault UI). */
+  private async signFileViaVault(options: {
+    fileHash: string;
+    intent?: string;
+    aiGeneration?: string;
+    contentRights?: Record<string, string>;
+  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number; action_hash: string | null }> {
+    const controller = new AbortController();
+    // 60s Vault approval timeout + buffer
+    const timeout = setTimeout(() => controller.abort(), 70000);
+    try {
+      const response = await fetch('http://127.0.0.1:27777/sign-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          file_hash: options.fileHash,
+          intent: options.intent || 'Authorship',
+          ai_generation: options.aiGeneration || null,
+          content_rights: options.contentRights || null,
+          client_id: this.config.clientId,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (data.error === 'user_denied') throw new UserDeniedError();
+        if (data.error === 'vault_locked') {
+          throw new VaultRequiredError('Flowsta Vault is locked. Ask the user to unlock it and try again.');
+        }
+        throw new FlowstaAuthError(
+          data.description || data.message || 'Vault signing failed',
+          data.error || 'vault_signing_failed',
+        );
+      }
+      return {
+        success: true,
+        file_hash: data.file_hash,
+        agent_pub_key: data.agent_pub_key,
+        signed_at: data.signed_at,
+        action_hash: data.action_hash || null,
+      };
+    } catch (err) {
+      if (err instanceof FlowstaAuthError) throw err;
+      if ((err as Error).name === 'AbortError') {
+        throw new FlowstaAuthError('Vault signing timed out — the user may not have responded.', 'timeout');
+      }
+      throw new VaultRequiredError();
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   /**
@@ -472,6 +581,17 @@ export class FlowstaAuth {
   }): Promise<{ results: Array<{ file_hash: string; action_hash: string | null; success: boolean; error?: string }>; signed: number; failed: number }> {
     const token = this.getAccessToken();
     if (!token) throw new Error('Not authenticated');
+
+    // Batch signing is a legacy custodial-API capability. Device-hosted
+    // accounts sign through the Vault, which approves one document at a
+    // time — call signFile() per file instead (each shows a Vault prompt).
+    const vault = await this.detectVault();
+    if (vault.running) {
+      throw new FlowstaAuthError(
+        'Batch signing is not available through Flowsta Vault — call signFile() per file so the user can approve each signature.',
+        'batch_requires_individual_approval',
+      );
+    }
 
     const response = await fetch(`${this.config.apiUrl}/api/v1/sign-it/sign-batch`, {
       method: 'POST',
@@ -496,8 +616,13 @@ export class FlowstaAuth {
       }),
     });
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || 'Batch signing failed');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (this.user?.signingMode !== 'remote' || response.status === 403 || response.status >= 500) {
+        throw new VaultRequiredError();
+      }
+      throw new FlowstaAuthError(data.message || 'Batch signing failed', data.error || 'signing_failed');
+    }
     return data;
   }
 
