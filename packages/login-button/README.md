@@ -35,7 +35,7 @@ function App() {
     <FlowstaLoginButton
       clientId="your-client-id"
       redirectUri="https://yourapp.com/callback"
-      scopes={['profile', 'email']}
+      scopes={['openid', 'display_name', 'profile_picture']}
       variant="dark-pill"
       onSuccess={(data) => {
         console.log('Authorization code:', data.code);
@@ -56,7 +56,7 @@ function App() {
   <FlowstaLoginButton
     clientId="your-client-id"
     redirectUri="https://yourapp.com/callback"
-    :scopes="['profile', 'email']"
+    :scopes="['openid', 'display_name', 'profile_picture']"
     variant="dark-pill"
     @success="handleSuccess"
     @error="handleError"
@@ -88,7 +88,7 @@ export default component$(() => {
     <FlowstaLoginButton
       clientId="your-client-id"
       redirectUri="https://yourapp.com/callback"
-      scopes={['profile', 'email']}
+      scopes={['openid', 'display_name', 'profile_picture']}
       variant="dark-pill"
       onSuccess$={(data) => {
         console.log('Authorization code:', data.code);
@@ -110,7 +110,7 @@ import { initFlowstaLoginButton } from '@flowsta/login-button/vanilla';
 initFlowstaLoginButton('#login-container', {
   clientId: 'your-client-id',
   redirectUri: 'https://yourapp.com/callback',
-  scopes: ['profile', 'email'],
+  scopes: ['openid', 'display_name', 'profile_picture'],
   variant: 'dark-pill',
   onSuccess: (data) => {
     console.log('Authorization code:', data.code);
@@ -192,7 +192,7 @@ app.post('/api/auth/token', async (req, res) => {
       grant_type: 'authorization_code',
       code,
       client_id: process.env.FLOWSTA_CLIENT_ID,
-      client_secret: process.env.FLOWSTA_CLIENT_SECRET,
+      // No client_secret — PKCE (code_verifier) protects the exchange
       redirect_uri: process.env.REDIRECT_URI,
       code_verifier: codeVerifier
     })
@@ -213,7 +213,7 @@ All components accept the following configuration:
 |----------|------|----------|---------|-------------|
 | `clientId` | `string` | ✅ | - | Your Flowsta application client ID |
 | `redirectUri` | `string` | ✅ | - | URI to redirect back to after authentication |
-| `scopes` | `string[]` | ❌ | `['profile']` | OAuth scopes: `'profile'`, `'email'` |
+| `scopes` | `string[]` | ❌ | `['openid', 'email', 'display_name']` | OAuth scopes: `'openid'`, `'email'`, `'display_name'`, `'username'`, `'did'`, `'profile_picture'`, `'holochain'`. Note: `email` is absent for device-hosted accounts (the norm) — ask the user if you need one. |
 | `variant` | `string` | ❌ | `'dark-pill'` | Button variant (see variants above) |
 | `loginUrl` | `string` | ❌ | `'https://login.flowsta.com'` | Flowsta login URL |
 | `className` | `string` | ❌ | `''` | Custom CSS class name |
@@ -314,7 +314,7 @@ const { verifier, challenge } = await generatePKCEPair();
 const { url, state, codeVerifier } = await buildAuthorizationUrl({
   clientId: 'your-client-id',
   redirectUri: 'https://yourapp.com/callback',
-  scopes: ['profile', 'email']
+  scopes: ['openid', 'display_name', 'profile_picture']
 });
 
 // Handle callback
@@ -412,9 +412,8 @@ MIT © Flowsta
 
 ## Related Packages
 
-- [`@flowsta/auth-sdk`](https://www.npmjs.com/package/@flowsta/auth-sdk) - Core authentication SDK
-- [`@flowsta/auth-react`](https://www.npmjs.com/package/@flowsta/auth-react) - React hooks and context
-- [`@flowsta/auth-client`](https://www.npmjs.com/package/@flowsta/auth-client) - HTTP client for Flowsta API
+- [`@flowsta/auth`](https://www.npmjs.com/package/@flowsta/auth) - Core authentication SDK (token exchange, userinfo, Sign It, React bindings)
+- [`@flowsta/holochain`](https://www.npmjs.com/package/@flowsta/holochain) - Vault integration: sign-in, agent linking, encrypted backups
 
 ---
 
