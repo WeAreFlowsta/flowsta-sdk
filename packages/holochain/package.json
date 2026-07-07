@@ -1,6 +1,6 @@
 {
   "name": "@flowsta/holochain",
-  "version": "2.4.4",
+  "version": "2.5.0",
   "description": "Flowsta Holochain SDK - Link your Holochain app's agent key with the user's Flowsta Vault identity.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -36,7 +36,7 @@
     "url": "https://github.com/WeAreFlowsta/flowsta-sdk.git",
     "directory": "packages/holochain"
   },
-"devDependencies": {
+  "devDependencies": {
     "happy-dom": "20.5.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",

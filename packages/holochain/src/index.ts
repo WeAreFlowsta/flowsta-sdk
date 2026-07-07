@@ -116,6 +116,11 @@ export class BackupTooLargeError extends FlowstaHolochainError {
   }
 }
 
+/**
+ * Thrown by `restoreFromVault` when EVERY record fails to dispatch (a broken
+ * dispatcher, not bad data). Partial failures do NOT throw — they're returned
+ * in `RestoreFromVaultResult.failed`.
+ */
 export class DispatcherFailedError extends FlowstaHolochainError {
   constructor(
     public readonly record: BackupRecord,
@@ -140,6 +145,12 @@ export class RestoreInProgressError extends FlowstaHolochainError {
   }
 }
 
+/**
+ * Reserved. Decode failures during backup do NOT throw — the record keeps its
+ * signed `raw_record` (restore is unaffected) and `human_readable` degrades to
+ * `{ _warning: 'decode_failed' }`. This class exists for apps that want to
+ * throw it from their own decoders.
+ */
 export class DecodeFailedError extends FlowstaHolochainError {
   constructor(public readonly entryType: string, public readonly cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause);
@@ -694,13 +705,23 @@ export async function checkFlowstaLinkStatus(
  *
  * @throws {VaultNotFoundError} Vault is not running
  * @throws {VaultLockedError} Vault is locked
- * @throws {FlowstaHolochainError} Backup failed (e.g. too large, too many backups)
+ * @throws {BackupTooLargeError} Payload exceeds the Vault's 50 MB per-backup limit
+ * @throws {FlowstaHolochainError} Backup failed for another reason
  */
 export async function backupToVault(
   options: FlowstaBackupOptions,
   data: unknown,
 ): Promise<FlowstaBackupResult> {
   const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+
+  const body = JSON.stringify({
+    client_id: options.clientId,
+    app_name: options.appName,
+    label: options.label,
+    data,
+    content_type: options.contentType,
+  });
+  const dataSize = new TextEncoder().encode(body).length;
 
   let response: Response;
   try {
@@ -711,13 +732,7 @@ export async function backupToVault(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({
-        client_id: options.clientId,
-        app_name: options.appName,
-        label: options.label,
-        data,
-        content_type: options.contentType,
-      }),
+      body,
     });
     clearTimeout(timeout);
   } catch {
@@ -727,6 +742,9 @@ export async function backupToVault(
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     if (err.error === 'vault_locked' || err.error === 'vault_never_unlocked') throw new VaultLockedError();
+    if (err.error === 'backup_too_large' || response.status === 413) {
+      throw new BackupTooLargeError(dataSize, 50 * 1024 * 1024);
+    }
     throw new FlowstaHolochainError(
       err.description || 'Backup failed',
       err.error || 'backup_failed',
@@ -1289,7 +1307,10 @@ export interface AdminWebsocketLike {
 export interface BackupRecord {
   /** Entry type name from the DNA (e.g. "Poll", "Vote"). */
   entryType: string;
-  /** Action hash as a base64 string. */
+  /**
+   * Action hash as a base64 string — the hash at BACKUP time. A restore
+   * re-authors the entry, so the restored copy has a different hash.
+   */
   actionHash: string;
   /** Action timestamp in milliseconds since epoch. */
   createdAtMs: number;
@@ -1475,6 +1496,12 @@ export interface RestoreFromVaultOptions {
    * Called once per record from the backup. Implementations typically dispatch
    * by entryType to the appropriate zome function via the app's own Tauri
    * command (e.g. `invoke("restore_record", { entryType, entryB64 })`).
+   *
+   * IMPORTANT: restoring RE-AUTHORS each entry onto the current agent's
+   * fresh source chain — every restored entry gets a NEW action hash.
+   * `record.actionHash` is the ORIGINAL hash from the backup and will not
+   * match the restored entry. If your app keys data by action hash, build
+   * a mapping during restore (old hash → the hash your zome call returns).
    */
   dispatcher: (record: BackupRecord) => Promise<void>;
   /** Optional progress callback (current, total). */
@@ -1500,8 +1527,13 @@ const _restoresInProgress: Set<string> = new Set();
  * payload and calling `dispatcher` once per record. The dispatcher decides
  * how to re-create each entry (typically a zome call inside a Tauri command).
  *
+ * NOTE: restore RE-AUTHORS entries — every restored entry gets a new action
+ * hash (see `RestoreFromVaultOptions.dispatcher`).
+ *
  * Per-record dispatcher failures are caught; the function continues through
  * the rest of the records and surfaces failures in the returned result.
+ * If EVERY record fails, the dispatcher itself is broken and a
+ * `DispatcherFailedError` is thrown instead.
  */
 export async function restoreFromVault(
   options: RestoreFromVaultOptions,
@@ -1545,6 +1577,14 @@ export async function restoreFromVault(
       options.onProgress?.(i + 1, allRecords.length);
     }
 
+    if (allRecords.length > 0 && succeeded === 0) {
+      // Every record failed — the dispatcher itself is broken, not the data.
+      throw new DispatcherFailedError(
+        failed[0].record,
+        new Error(`all ${allRecords.length} records failed; first error: ${failed[0].error}`),
+      );
+    }
+
     return { totalRecords: allRecords.length, succeeded, failed };
   } finally {
     _restoresInProgress.delete(options.clientId);
@@ -1556,9 +1596,17 @@ export interface FlowstaAutoBackupConfigV2 {
   clientId: string;
   appName: string;
   adminWebsocket: AdminWebsocketLike;
-  /** Single cell id today (v2.4.0). Multi-cell can grow into an array later without breaking the payload shape. */
+  /** The app's primary cell. */
   cellId: [Uint8Array, Uint8Array];
   cellRoleName: string;
+  /**
+   * Further cells to include in the same backup (v2.5.0+). Each becomes its
+   * own entry in the payload's `cells[]` — restore already handles multi-cell.
+   */
+  additionalCells?: Array<{
+    cellId: [Uint8Array, Uint8Array];
+    roleName: string;
+  }>;
   /** Filter source-chain records to this agent. */
   agentPubKey: Uint8Array;
   decodeRecordForExport: (
@@ -1594,19 +1642,42 @@ function isAutoBackupConfigV2(
 }
 
 /**
- * Build a canonical `BackupPayload` from a single-cell dump.
+ * Build a canonical `BackupPayload` from the app's cell(s).
  * Exported so apps can serialise to file (debug) without going through Vault.
  */
 export async function buildBackupPayload(
   config: FlowstaAutoBackupConfigV2,
 ): Promise<BackupPayload> {
-  const result = await dumpCellStateForBackup({
-    adminWebsocket: config.adminWebsocket,
-    cellId: config.cellId,
-    agentPubKey: config.agentPubKey,
-    roleName: config.cellRoleName,
-    decodeRecordForExport: config.decodeRecordForExport,
-  });
+  const cellSpecs = [
+    { cellId: config.cellId, roleName: config.cellRoleName },
+    ...(config.additionalCells ?? []),
+  ];
+
+  const dumps = [] as Array<{
+    roleName: string;
+    records: BackupRecord[];
+    summary: BackupSummary;
+  }>;
+  for (const spec of cellSpecs) {
+    const result = await dumpCellStateForBackup({
+      adminWebsocket: config.adminWebsocket,
+      cellId: spec.cellId,
+      agentPubKey: config.agentPubKey,
+      roleName: spec.roleName,
+      decodeRecordForExport: config.decodeRecordForExport,
+    });
+    dumps.push({ roleName: spec.roleName, records: result.records, summary: result.summary });
+  }
+
+  // Aggregate the per-cell summaries so Vault renders one app-level view.
+  const countsByEntryType: Record<string, number> = {};
+  let totalRecords = 0;
+  for (const d of dumps) {
+    totalRecords += d.summary.totalRecords;
+    for (const [k, v] of Object.entries(d.summary.countsByEntryType)) {
+      countsByEntryType[k] = (countsByEntryType[k] || 0) + v;
+    }
+  }
 
   return {
     version: 1,
@@ -1615,15 +1686,13 @@ export async function buildBackupPayload(
     app: { name: config.appName, client_id: config.clientId },
     agent_pub_key: agentPubKeyToString(config.agentPubKey),
     exported_at_iso: new Date().toISOString(),
-    _summary: result.summary,
-    cells: [
-      {
-        role_name: config.cellRoleName,
-        _readme:
-          "Each record below is one thing you did. `human_readable` is the plain-English view of the entry. `raw_record` is the cryptographically signed Holochain record that lets any compatible app verify and restore it.",
-        records: result.records,
-      },
-    ],
+    _summary: { countsByEntryType, totalRecords },
+    cells: dumps.map((d) => ({
+      role_name: d.roleName,
+      _readme:
+        "Each record below is one thing you did. `human_readable` is the plain-English view of the entry. `raw_record` is the cryptographically signed Holochain record that lets any compatible app verify and restore it.",
+      records: d.records,
+    })),
   };
 }
 
