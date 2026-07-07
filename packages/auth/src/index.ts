@@ -20,7 +20,7 @@ export interface FlowstaAuthConfig {
   clientId: string;
   /** The URI to redirect back to after authentication */
   redirectUri: string;
-  /** OAuth scopes to request. Default: ['openid', 'email', 'display_name'] */
+  /** OAuth scopes to request. Default: ['openid', 'display_name'] */
   scopes?: string[];
   /** The Flowsta login URL. Default: 'https://login.flowsta.com' */
   loginUrl?: string;
@@ -188,7 +188,7 @@ export class FlowstaAuth {
     this.config = {
       clientId: config.clientId,
       redirectUri: config.redirectUri,
-      scopes: config.scopes || ['openid', 'email', 'display_name'],
+      scopes: config.scopes || ['openid', 'display_name'],
       loginUrl: config.loginUrl || 'https://login.flowsta.com',
       apiUrl: config.apiUrl || 'https://auth-api.flowsta.com',
     };

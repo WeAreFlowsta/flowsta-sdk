@@ -34,7 +34,7 @@ export interface FlowstaLoginButtonQwikProps extends FlowstaLoginConfig {
  *     <FlowstaLoginButton
  *       clientId="your-client-id"
  *       redirectUri="https://yourapp.com/callback"
- *       scopes={['openid', 'email', 'display_name']}
+ *       scopes={['openid', 'display_name']}
  *       variant="dark-pill"
  *       onSuccess$={(data) => {
  *         console.log('Authorization code:', data.code);
@@ -51,7 +51,7 @@ export const FlowstaLoginButton = component$<FlowstaLoginButtonQwikProps>((props
   const {
     clientId,
     redirectUri,
-    scopes = ['openid', 'email', 'display_name'],
+    scopes = ['openid', 'display_name'],
     variant = 'dark-pill',
     loginUrl,
     className = '',

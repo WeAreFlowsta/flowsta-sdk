@@ -43,7 +43,7 @@ export interface FlowstaLoginConfig {
   /** The URI to redirect back to after authentication (required) */
   redirectUri: string;
   
-  /** OAuth scopes to request (default: ['openid', 'email', 'display_name']) */
+  /** OAuth scopes to request (default: ['openid', 'display_name']) */
   scopes?: FlowstaScope[];
   
   /** Button visual variant (default: 'dark-pill') */

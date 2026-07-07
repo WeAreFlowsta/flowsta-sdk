@@ -34,7 +34,7 @@ import { BUTTON_DATA_URIS } from './buttonDataUris.js';
  * <FlowstaLoginButton
  *   clientId="your-client-id"
  *   redirectUri="https://yourapp.com/callback"
- *   :scopes="['openid', 'email', 'display_name']"
+ *   :scopes="['openid', 'display_name']"
  *   variant="dark-pill"
  *   @success="handleSuccess"
  *   @error="handleError"
@@ -43,7 +43,7 @@ import { BUTTON_DATA_URIS } from './buttonDataUris.js';
  */
 
 const props = withDefaults(defineProps<VueFlowstaLoginButtonProps>(), {
-  scopes: () => ['openid', 'email', 'display_name'],
+  scopes: () => ['openid', 'display_name'],
   variant: 'dark-pill',
   className: '',
   disabled: false,

@@ -27,7 +27,7 @@ export interface FlowstaLoginButtonVanillaOptions extends FlowstaLoginConfig {
  * const button = createFlowstaLoginButton({
  *   clientId: 'your-client-id',
  *   redirectUri: 'https://yourapp.com/callback',
- *   scopes: ['openid', 'email', 'display_name'],
+ *   scopes: ['openid', 'display_name'],
  *   variant: 'dark-pill',
  *   onSuccess: (data) => {
  *     console.log('Authorization code:', data.code);
@@ -46,7 +46,7 @@ export function createFlowstaLoginButton(
   const {
     clientId,
     redirectUri,
-    scopes = ['openid', 'email', 'display_name'],
+    scopes = ['openid', 'display_name'],
     variant = 'dark-pill',
     loginUrl,
     className = '',
@@ -137,7 +137,7 @@ export function createFlowstaLoginButton(
  * initFlowstaLoginButton('#login-button-container', {
  *   clientId: 'your-client-id',
  *   redirectUri: 'https://yourapp.com/callback',
- *   scopes: ['openid', 'email', 'display_name'],
+ *   scopes: ['openid', 'display_name'],
  *   variant: 'dark-pill'
  * });
  * ```
