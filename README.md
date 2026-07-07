@@ -14,7 +14,6 @@ Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based
 | **[@flowsta/auth](./packages/auth)** ⭐ | `2.2.0` | Core OAuth SDK + Sign It (file signing & verification) |
 | **[@flowsta/login-button](./packages/login-button)** | `0.1.4` | Pre-built button components |
 | **[@flowsta/holochain](./packages/holochain)** | `2.4.4` | Vault agent linking, backups, Sign It document signing, rich link status |
-| **[@flowsta/auth-tauri](./packages/auth-tauri)** | `0.1.0` | Desktop auth via Flowsta Vault |
 
 ## 🚀 Getting Started
 
@@ -84,16 +83,6 @@ Link your Holochain app's agent key with the user's Flowsta Vault identity.
 - ✅ Link status checks and revocation
 - ✅ TypeScript-first with full type safety
 - ✅ Zero dependencies
-
-### [@flowsta/auth-tauri](./packages/auth-tauri)
-
-Desktop app authentication via Flowsta Vault's Tauri IPC.
-
-**Features**:
-- ✅ Vault setup, unlock, and lock
-- ✅ Identity management and web account linking
-- ✅ Recovery phrase validation
-- ✅ TypeScript-first with full type safety
 
 ## 💡 Quick Start Examples
 
@@ -314,7 +303,6 @@ Flowsta provides **zero-knowledge authentication** powered by Holochain:
 - [@flowsta/auth](./packages/auth/README.md) - Core SDK documentation
 - [@flowsta/login-button](./packages/login-button/README.md) - Button components
 - [@flowsta/holochain](./packages/holochain/README.md) - Vault agent linking & backups
-- [@flowsta/auth-tauri](./packages/auth-tauri/README.md) - Desktop auth via Vault
 
 ### Developer Resources
 - **[Developer Portal](https://dev.flowsta.com)** - Create apps, manage settings
@@ -352,7 +340,6 @@ npm run lint        # Lint code (coming soon)
 sdk-monorepo/
 ├── packages/
 │   ├── auth/              # Core OAuth SDK with React bindings
-│   ├── auth-tauri/        # Desktop auth via Flowsta Vault
 │   ├── holochain/         # Vault agent linking & backup SDK
 │   └── login-button/      # Pre-built button components
 └── README.md
