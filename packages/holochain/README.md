@@ -133,6 +133,8 @@ controller.stop();
 
 You provide one Tauri command, `decode_record_for_export`, with one `match` arm per entry type. Each arm decodes the entry's MessagePack bytes with `rmp_serde::from_slice` and converts to JSON via `serde_json::to_value(struct)` — leveraging the existing `#[derive(Serialize)]` on your entry structs. See [docs.flowsta.com/sdk/holochain#backups](https://docs.flowsta.com/sdk/holochain#backups) for the full code.
 
+**Non-empty backup protection (v2.6.0+, on by default).** Auto-backup fires immediately on start — including the first start after a reinstall or on a new device, when the source chain is still empty but the user's Vault holds their real backup. Writing that empty payload would destroy the Vault copy (records AND any keys the payload carries) before the user has recovered anything. `startAutoBackup` now probes the existing backup first and skips the write when the new payload has zero user records but the Vault copy doesn't; `onError` receives an `EmptyBackupSkippedError` (code `empty_backup_skipped`) so you can tell the skip apart from a real failure. The next non-empty backup writes normally. Set `protectNonEmpty: false` only if your app intentionally writes empty canonical payloads. Apps that post with `backupToVault` directly can run the same check via `wouldOverwriteNonEmptyBackup(options, payload)`.
+
 **Legacy `getData` signature (backwards-compatible).** Pass a `getData()` callback that returns the backup data directly. Returns a `stop()` function. Use this for apps that build the payload themselves on the Rust side (see [the Rust-side alternative](https://docs.flowsta.com/sdk/holochain#rust-side-alternative-for-app-websocket-apps) in the docs):
 
 ```typescript
@@ -336,6 +338,7 @@ Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the us
 | `DispatcherFailedError` _(2.4.0)_ | A `restoreFromVault` dispatcher threw on a record | Surface in the restore summary; offer retry |
 | `RestoreInProgressError` _(2.4.0)_ | Concurrent `restoreFromVault` calls collided | Disable the restore button while one is running |
 | `DecodeFailedError` _(2.4.0)_ | `decodeRecordForExport` threw on an entry | Backup continues; record carries `_warning: "decode_failed"` |
+| `EmptyBackupSkippedError` _(2.6.0)_ | Auto-backup skipped: empty payload would overwrite a non-empty Vault backup | Not a failure — finish recovery; the next non-empty backup writes normally |
 
 ```typescript
 import { linkFlowstaIdentity, VaultNotFoundError, UserDeniedError } from '@flowsta/holochain';

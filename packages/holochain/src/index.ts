@@ -162,6 +162,33 @@ export class DecodeFailedError extends FlowstaHolochainError {
   }
 }
 
+/**
+ * An auto-backup was skipped because writing it would have replaced a
+ * non-empty Vault backup with an EMPTY one (v2.6.0+).
+ *
+ * This is the fresh-install trap: after a reinstall or on a new device, the
+ * app's source chain is empty while the user's Vault still holds their real
+ * backup - and `startAutoBackup` fires immediately on start. Without this
+ * guard, that first write destroys the Vault copy (records AND any keys the
+ * payload carries) before the user has recovered anything.
+ *
+ * Delivered to `onError` so apps can tell the skip apart from a failure.
+ * It is not an error in the user's world - the right response is usually to
+ * finish recovery (recognition or `restoreFromVault`), after which the next
+ * backup carries real records and writes normally.
+ */
+export class EmptyBackupSkippedError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'Backup skipped: this payload has no user records but the Vault backup does. ' +
+        'Recover this device first (recognition or restoreFromVault); the next ' +
+        'non-empty backup will write normally.',
+      'empty_backup_skipped',
+    );
+    this.name = 'EmptyBackupSkippedError';
+  }
+}
+
 // ── Backup Types ──────────────────────────────────────────────────
 
 export interface FlowstaBackupOptions {
@@ -221,6 +248,13 @@ export interface FlowstaAutoBackupConfig {
   label?: string;
   /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
   ipcUrl?: string;
+  /**
+   * Never replace a non-empty Vault backup with an empty payload (v2.6.0+).
+   * Default: true. When a write is skipped, `onError` receives an
+   * `EmptyBackupSkippedError`. Only disable if your app intentionally
+   * writes empty canonical payloads.
+   */
+  protectNonEmpty?: boolean;
   /** Called when backup succeeds */
   onSuccess?: (result: FlowstaBackupResult) => void;
   /** Called when backup fails */
@@ -814,6 +848,61 @@ export async function retrieveFromVault(
     createdAt: result.created_at,
     dataSize: result.data_size,
   };
+}
+
+/**
+ * True when writing `payload` would replace a non-empty Vault backup with an
+ * empty one (v2.6.0+) - the fresh-install trap `EmptyBackupSkippedError`
+ * describes. `startAutoBackup` calls this automatically (see
+ * `protectNonEmpty`); it is exported for apps that post with `backupToVault`
+ * directly.
+ *
+ * Judgement is deliberately conservative:
+ * - Non-canonical payloads (no `_summary.totalRecords`) are never blocked -
+ *   there is nothing to compare.
+ * - A payload WITH records is never blocked.
+ * - An empty payload is allowed only when the Vault slot is confirmed empty
+ *   or absent (HTTP 404). A failed probe, or an existing backup whose record
+ *   count can't be read, blocks the write - when in doubt, don't overwrite.
+ */
+export async function wouldOverwriteNonEmptyBackup(
+  options: { clientId: string; label?: string; ipcUrl?: string },
+  payload: unknown,
+): Promise<boolean> {
+  const total = (payload as Partial<BackupPayload> | undefined)?._summary
+    ?.totalRecords;
+  if (typeof total !== 'number' || total > 0) return false;
+
+  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  let response: Response;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    response = await fetch(`${ipcUrl}/backup/retrieve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        client_id: options.clientId,
+        label: options.label,
+      }),
+    });
+    clearTimeout(timeout);
+  } catch {
+    return true; // probe failed - when in doubt, don't overwrite
+  }
+  if (response.status === 404) return false; // first-ever backup
+  if (!response.ok) return true;
+
+  try {
+    const existing = await response.json();
+    const existingTotal = (existing?.data as Partial<BackupPayload> | undefined)
+      ?._summary?.totalRecords;
+    // An unreadable record count on an EXISTING backup counts as non-empty.
+    return typeof existingTotal !== 'number' || existingTotal > 0;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -1623,6 +1712,13 @@ export interface FlowstaAutoBackupConfigV2 {
   label?: string;
   /** Vault IPC URL. Default: 'http://127.0.0.1:27777'. */
   ipcUrl?: string;
+  /**
+   * Never replace a non-empty Vault backup with an empty payload (v2.6.0+).
+   * Default: true. When a write is skipped, `onError` receives an
+   * `EmptyBackupSkippedError`. Only disable if your app intentionally
+   * writes empty canonical payloads.
+   */
+  protectNonEmpty?: boolean;
   onSuccess?: (result: FlowstaBackupResult) => void;
   onError?: (error: Error) => void;
 }
@@ -1732,6 +1828,13 @@ export function startAutoBackup(
       const status = await getVaultStatus(v2.ipcUrl);
       if (!status.running) return;
       const payload = await buildBackupPayload(v2);
+      if (
+        (v2.protectNonEmpty ?? true) &&
+        (await wouldOverwriteNonEmptyBackup(v2, payload))
+      ) {
+        v2.onError?.(new EmptyBackupSkippedError());
+        return;
+      }
       const result = await backupToVault(
         {
           clientId: v2.clientId,
@@ -1792,6 +1895,13 @@ function startAutoBackupLegacy(config: FlowstaAutoBackupConfig): () => void {
       const status = await getVaultStatus(config.ipcUrl);
       if (!status.running) return;
       const data = await config.getData();
+      if (
+        (config.protectNonEmpty ?? true) &&
+        (await wouldOverwriteNonEmptyBackup(config, data))
+      ) {
+        config.onError?.(new EmptyBackupSkippedError());
+        return;
+      }
       const result = await backupToVault(
         {
           clientId: config.clientId,
