@@ -16,6 +16,18 @@ Flowsta Vault acts as a local identity provider (like MetaMask for Ethereum) for
 
 Full docs: [docs.flowsta.com/sdk/holochain](https://docs.flowsta.com/sdk/holochain) • [Why integrate Flowsta](https://docs.flowsta.com/getting-started/why-flowsta) • [Backups & Reinstall Recovery](https://docs.flowsta.com/sdk/holochain#backups)
 
+## Migrating to v3
+
+v3 makes wrong-identity and error states impossible to mistake for "no data". Two changes can break existing code:
+
+1. **`retrieveFromVault` / `restoreFromVault` now throw where they returned `null` / `{totalRecords: 0}`.** A `null` from `retrieveFromVault` (and a zero-record restore) now means a CONFIRMED absent backup and nothing else. An unreachable Vault throws `VaultNotFoundError`, a locked Vault `VaultLockedError`, a backup belonging to a different identity `IdentityMismatchError`, an unreadable backup `FlowstaHolochainError`. Previously all of these read as "no backup", which made a restore against an offline or wrong-identity Vault report success. If you probed for optional backups with a bare `retrieveFromVault`, check `getVaultStatus()` first or catch these errors.
+2. **`backupToVault` refuses two dangerous writes by default.** An empty canonical payload that would replace a non-empty backup throws `EmptyBackupSkippedError` (previously only `startAutoBackup` had this guard; pass `protectNonEmpty: false` to opt out). And when an identity is bound (see below), a Vault holding a different identity throws `IdentityMismatchError`.
+
+New in v3, no code needed:
+
+- **Identity binding** — `linkFlowstaIdentity` records the Vault identity it linked with (persisted in `localStorage` where available) and every later Vault call refuses on a definite mismatch. `bindVaultIdentity()` / `getBoundIdentity()` / `clearBoundIdentity()` are exported for apps that manage links themselves, `onIdentityChanged(cb)` polls for Vault account switches (UX only - every call asserts independently), and `agentKeysMatch(a, b)` compares agent keys across their base64url and base58 encodings.
+- **Port sweep** — when no `ipcUrl` is given, calls resolve the Vault across ports 27777-27779 instead of assuming 27777 (a second Vault instance shifts ports; "absent" used to fail open).
+
 ## Installation
 
 ```bash

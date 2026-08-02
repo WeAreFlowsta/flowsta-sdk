@@ -189,6 +189,247 @@ export class EmptyBackupSkippedError extends FlowstaHolochainError {
   }
 }
 
+/**
+ * The Vault holds a DIFFERENT identity than this app is bound to (or than a
+ * stored backup was written under). Thrown instead of proceeding, because
+ * every write against the wrong identity is potential data loss and every
+ * read is another identity's data.
+ *
+ * Do NOT treat this like `EmptyBackupSkippedError` and retry after a restore:
+ * the right response is to stop, tell the user which identity the app
+ * belongs to, and let them switch the Vault (or re-link deliberately with
+ * `linkFlowstaIdentity`, which re-binds).
+ */
+export class IdentityMismatchError extends FlowstaHolochainError {
+  constructor(
+    public readonly expected?: string,
+    public readonly actual?: string,
+    detail?: string,
+  ) {
+    super(
+      detail ||
+        'The Vault is signed in to a different identity than this app is linked to. ' +
+          'Switch the Vault back to the linked identity, or re-link this app deliberately.',
+      'identity_mismatch',
+    );
+    this.name = 'IdentityMismatchError';
+  }
+}
+
+// ── Identity binding ──────────────────────────────────────────────
+//
+// Bind-at-link, assert-on-call: `linkFlowstaIdentity` records the Vault
+// identity it linked with, and every later Vault call refuses on a
+// definite mismatch - the developer writes no code. The binding persists
+// in localStorage where available (an SPA reload must not silently
+// unbind - that would fail OPEN), with a module variable fallback.
+//
+// Key comparison decodes through BYTES: agent keys appear as
+// uhCAk + base64url (Vault) and uhCAk + base58 (some API surfaces), so a
+// string compare would false-mismatch. When neither form decodes, the
+// comparison abstains (null) and the call proceeds - refusal requires a
+// DEFINITE mismatch, never an unparseable key.
+
+const BOUND_IDENTITY_STORAGE_KEY = 'flowsta:vault-bound-identity';
+let _boundIdentityMemory: string | null = null;
+
+function storageAvailable(): Storage | null {
+  try {
+    if (typeof localStorage !== 'undefined') return localStorage;
+  } catch {
+    // Restricted context (some webviews throw on access).
+  }
+  return null;
+}
+
+/**
+ * Record the Vault identity this app operates under. Called automatically by
+ * `linkFlowstaIdentity` on success; exported for apps that link through
+ * another channel (e.g. a stored `identity-link.json`) and want the same
+ * protection.
+ */
+export function bindVaultIdentity(agentPubKey: string): void {
+  _boundIdentityMemory = agentPubKey;
+  storageAvailable()?.setItem(BOUND_IDENTITY_STORAGE_KEY, agentPubKey);
+}
+
+/** The bound Vault identity, or null when nothing is bound. */
+export function getBoundIdentity(): string | null {
+  const stored = storageAvailable()?.getItem(BOUND_IDENTITY_STORAGE_KEY);
+  return stored ?? _boundIdentityMemory;
+}
+
+/** Forget the binding (app-side unlink / sign-out). */
+export function clearBoundIdentity(): void {
+  _boundIdentityMemory = null;
+  storageAvailable()?.removeItem(BOUND_IDENTITY_STORAGE_KEY);
+}
+
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58Decode(s: string): Uint8Array | null {
+  let n = 0n;
+  for (const c of s) {
+    const v = BASE58_ALPHABET.indexOf(c);
+    if (v < 0) return null;
+    n = n * 58n + BigInt(v);
+  }
+  const bytes: number[] = [];
+  while (n > 0n) {
+    bytes.unshift(Number(n & 0xffn));
+    n >>= 8n;
+  }
+  for (const c of s) {
+    if (c === '1') bytes.unshift(0);
+    else break;
+  }
+  return Uint8Array.from(bytes);
+}
+
+/**
+ * Decode a `u…` agent key string to its 39 raw bytes, trying base64url then
+ * base58. Returns null when neither yields a plausible holo-hash
+ * (39 bytes starting 0x84 0x20 0x24).
+ */
+function agentKeyBytes(key: string): Uint8Array | null {
+  if (!key || !key.startsWith('u')) return null;
+  const body = key.slice(1);
+  const plausible = (b: Uint8Array | null): b is Uint8Array =>
+    !!b && b.length === 39 && b[0] === 0x84 && b[1] === 0x20 && b[2] === 0x24;
+
+  try {
+    const std = body.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(std);
+    const b = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    if (plausible(b)) return b;
+  } catch {
+    // fall through to base58
+  }
+  const b58 = base58Decode(body);
+  return plausible(b58) ? b58 : null;
+}
+
+/**
+ * Byte-compare two agent key strings across encodings.
+ * true = same key, false = DEFINITELY different, null = cannot compare.
+ */
+export function agentKeysMatch(a: string, b: string): boolean | null {
+  if (a === b) return true;
+  const ba = agentKeyBytes(a);
+  const bb = agentKeyBytes(b);
+  if (!ba || !bb) return null;
+  return ba.every((v, i) => v === bb[i]);
+}
+
+/** Refuse when the Vault's current identity definitely differs from the binding. */
+function assertBoundIdentity(vaultAgentPubKey: string | undefined): void {
+  const bound = getBoundIdentity();
+  // No binding, or the Vault key is unknown (locked /status reports null,
+  // which is never a mismatch) - nothing to assert.
+  if (!bound || !vaultAgentPubKey) return;
+  if (agentKeysMatch(bound, vaultAgentPubKey) === false) {
+    throw new IdentityMismatchError(bound, vaultAgentPubKey);
+  }
+}
+
+// ── Vault discovery (port sweep) ──────────────────────────────────
+//
+// The Vault binds 27777, or the next port up when that is taken (a second
+// instance, another app squatting the port). Hardcoding 27777 made every
+// call read "Vault absent" on a shifted port - and absence fails OPEN in
+// several callers. Explicit `ipcUrl` always wins; otherwise sweep once and
+// cache, re-sweeping after any connection failure.
+
+const VAULT_PORTS = [27777, 27778, 27779];
+let _resolvedVaultUrl: string | null = null;
+
+async function probeStatus(url: string, timeoutMs = 1500): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const r = await fetch(`${url}/status`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the Vault IPC base URL. An explicit `ipcUrl` is returned as-is;
+ * otherwise ports 27777-27779 are probed (cached until a call fails).
+ * When nothing answers, the default port is returned - callers surface
+ * their own not-found semantics.
+ */
+export async function resolveVaultUrl(ipcUrl?: string): Promise<string> {
+  if (ipcUrl) return ipcUrl;
+  if (_resolvedVaultUrl && (await probeStatus(_resolvedVaultUrl))) {
+    return _resolvedVaultUrl;
+  }
+  _resolvedVaultUrl = null;
+  for (const port of VAULT_PORTS) {
+    const url = `http://127.0.0.1:${port}`;
+    if (await probeStatus(url)) {
+      _resolvedVaultUrl = url;
+      return url;
+    }
+  }
+  return `http://127.0.0.1:${VAULT_PORTS[0]}`;
+}
+
+/**
+ * One insertion point for the running/unlocked/identity checks the signing
+ * and linking calls all share. Returns the parsed status on success.
+ *
+ * @throws {VaultNotFoundError} not running / unreachable
+ * @throws {VaultLockedError} running but locked
+ * @throws {IdentityMismatchError} unlocked under a definitely different identity
+ */
+async function requireUnlockedVault(ipcUrl: string): Promise<VaultStatus> {
+  const status = await getVaultStatus(ipcUrl);
+  if (!status.running) throw new VaultNotFoundError();
+  if (!status.unlocked) throw new VaultLockedError();
+  assertBoundIdentity(status.agentPubKey);
+  return status;
+}
+
+/**
+ * Watch for the Vault switching identities. UX only - correctness never
+ * depends on receiving this; every call asserts independently. Polls
+ * `/status` (there is no push channel to apps) and fires when the unlocked
+ * agent key changes. Locked (`agentPubKey` null) is NOT a change.
+ * Returns a stop function.
+ */
+export function onIdentityChanged(
+  callback: (next: string, previous: string | null) => void,
+  options: { ipcUrl?: string; intervalMs?: number } = {},
+): () => void {
+  let previous: string | null = null;
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const url = await resolveVaultUrl(options.ipcUrl);
+      const status = await getVaultStatus(url);
+      if (status.unlocked && status.agentPubKey) {
+        if (previous && agentKeysMatch(previous, status.agentPubKey) === false) {
+          callback(status.agentPubKey, previous);
+        }
+        previous = status.agentPubKey;
+      }
+    } catch {
+      // Unreachable Vault is not an identity change.
+    }
+  };
+  const timer = setInterval(tick, options.intervalMs ?? 5000);
+  void tick();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 // ── Backup Types ──────────────────────────────────────────────────
 
 export interface FlowstaBackupOptions {
@@ -200,8 +441,14 @@ export interface FlowstaBackupOptions {
   label?: string;
   /** MIME type hint (default: "application/json") */
   contentType?: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: sweep ports 27777-27779. */
   ipcUrl?: string;
+  /**
+   * Never replace a non-empty Vault backup with an empty canonical payload.
+   * Default: true (v3 - previously only `startAutoBackup` had this guard).
+   * Only disable if your app intentionally writes empty payloads.
+   */
+  protectNonEmpty?: boolean;
 }
 
 export interface FlowstaBackupResult {
@@ -383,17 +630,16 @@ export type FlowstaLinkStatus =
 /**
  * Check the status of Flowsta Vault.
  *
- * @param ipcUrl - Vault IPC URL. Default: 'http://127.0.0.1:27777'
+ * @param ipcUrl - Vault IPC URL. Default: sweep ports 27777-27779.
  * @returns Vault status (running, unlocked, agentPubKey, version)
  */
-export async function getVaultStatus(
-  ipcUrl = 'http://127.0.0.1:27777',
-): Promise<VaultStatus> {
+export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
+  const url = await resolveVaultUrl(ipcUrl);
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
 
-    const response = await fetch(`${ipcUrl}/status`, {
+    const response = await fetch(`${url}/status`, {
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -452,7 +698,7 @@ export async function getVaultStatus(
 export async function getFlowstaLinkStatus(
   options: CheckFlowstaLinkStatusOptions,
 ): Promise<FlowstaLinkStatus> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
   try {
     const controller = new AbortController();
@@ -523,30 +769,14 @@ export async function getFlowstaLinkStatus(
 export async function linkFlowstaIdentity(
   options: LinkFlowstaIdentityOptions,
 ): Promise<LinkFlowstaIdentityResult> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
-  // Step 1: Check Vault is running and unlocked
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-
-    const statusResponse = await fetch(`${ipcUrl}/status`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-
-    if (!statusResponse.ok) {
-      throw new VaultNotFoundError();
-    }
-
-    const status = await statusResponse.json();
-    if (!status.unlocked) {
-      throw new VaultLockedError();
-    }
-  } catch (err) {
-    if (err instanceof FlowstaHolochainError) throw err;
-    throw new VaultNotFoundError();
-  }
+  // Step 1: Vault running + unlocked. Deliberately NO identity assertion
+  // here - linking is the one call where a different identity is a
+  // legitimate, user-approved choice (it re-binds below).
+  const status = await getVaultStatus(ipcUrl);
+  if (!status.running) throw new VaultNotFoundError();
+  if (!status.unlocked) throw new VaultLockedError();
 
   // Step 2: Request identity link signature
   const response = await fetch(`${ipcUrl}/link-identity`, {
@@ -577,6 +807,12 @@ export async function linkFlowstaIdentity(
   }
 
   const data = await response.json();
+
+  // Bind-at-link: every later Vault call now asserts this identity
+  // automatically and refuses on a definite mismatch.
+  if (data.vault_agent_pub_key) {
+    bindVaultIdentity(data.vault_agent_pub_key);
+  }
 
   return {
     success: true,
@@ -739,6 +975,8 @@ export async function checkFlowstaLinkStatus(
  *
  * @throws {VaultNotFoundError} Vault is not running
  * @throws {VaultLockedError} Vault is locked
+ * @throws {IdentityMismatchError} Vault holds a different identity than this app is bound to
+ * @throws {EmptyBackupSkippedError} Empty canonical payload would replace a non-empty backup (v3: guard is default-on here, not just in `startAutoBackup`)
  * @throws {BackupTooLargeError} Payload exceeds the Vault's 50 MB per-backup limit
  * @throws {FlowstaHolochainError} Backup failed for another reason
  */
@@ -746,7 +984,26 @@ export async function backupToVault(
   options: FlowstaBackupOptions,
   data: unknown,
 ): Promise<FlowstaBackupResult> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+
+  // Identity assertion: a write against the wrong identity is potential
+  // data loss. Only enforced when a binding exists and the Vault key is
+  // readable - the Vault-side gates stay the load-bearing protection.
+  const bound = getBoundIdentity();
+  if (bound) {
+    const status = await getVaultStatus(ipcUrl);
+    if (status.unlocked) assertBoundIdentity(status.agentPubKey);
+  }
+
+  // Never replace a non-empty backup with an empty one. Default-on for
+  // ALL writes (v3) - the fresh-install clobber went through direct
+  // `backupToVault` callers too, not just auto-backup.
+  if (
+    (options.protectNonEmpty ?? true) &&
+    (await wouldOverwriteNonEmptyBackup({ ...options, ipcUrl }, data))
+  ) {
+    throw new EmptyBackupSkippedError();
+  }
 
   const body = JSON.stringify({
     client_id: options.clientId,
@@ -754,6 +1011,9 @@ export async function backupToVault(
     label: options.label,
     data,
     content_type: options.contentType,
+    // Forward-compatible hard gate: current Vaults ignore this field;
+    // once the bridge accepts expected_identity it refuses server-side.
+    expected_identity: bound || undefined,
   });
   const dataSize = new TextEncoder().encode(body).length;
 
@@ -776,6 +1036,9 @@ export async function backupToVault(
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     if (err.error === 'vault_locked' || err.error === 'vault_never_unlocked') throw new VaultLockedError();
+    if (err.error === 'identity_mismatch') {
+      throw new IdentityMismatchError(bound || undefined, undefined, err.description);
+    }
     if (err.error === 'backup_too_large' || response.status === 413) {
       throw new BackupTooLargeError(dataSize, 50 * 1024 * 1024);
     }
@@ -811,12 +1074,20 @@ export async function backupToVault(
  * }
  * ```
  *
- * @returns The backup data and metadata, or null if no backup exists
+ * @returns The backup data and metadata, or null when NO backup exists
+ *   (a confirmed 404 - the only case that returns null in v3)
+ * @throws {VaultNotFoundError} Vault unreachable (v3: was null, which read as
+ *   "no backup" and made `restoreFromVault` report success on an offline Vault)
+ * @throws {VaultLockedError} Vault locked / never unlocked this session
+ * @throws {IdentityMismatchError} slot exists but belongs to a different
+ *   identity (Vault 409; v3: was null → silent wrong-identity "success")
+ * @throws {FlowstaHolochainError} slot exists but is unreadable, or any other
+ *   Vault error - never collapsed into "absent"
  */
 export async function retrieveFromVault(
   options: FlowstaBackupRetrieveOptions,
 ): Promise<{ data: unknown; label?: string; createdAt: number; dataSize: number } | null> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
   let response: Response;
   try {
@@ -830,15 +1101,35 @@ export async function retrieveFromVault(
       body: JSON.stringify({
         client_id: options.clientId,
         label: options.label,
+        expected_identity: getBoundIdentity() || undefined,
       }),
     });
     clearTimeout(timeout);
   } catch {
-    return null;
+    throw new VaultNotFoundError();
   }
 
   if (!response.ok) {
-    return null;
+    const err = await response.json().catch(() => ({}));
+    // Absent is the ONLY "no backup". Everything else is a real condition
+    // the caller must see - collapsing errors into null is how a restore
+    // against the wrong identity used to report success.
+    if (response.status === 404 || err.error === 'backup_not_found') return null;
+    if (err.error === 'vault_locked' || err.error === 'vault_never_unlocked') {
+      throw new VaultLockedError();
+    }
+    if (response.status === 409 || err.error === 'identity_mismatch') {
+      throw new IdentityMismatchError(
+        getBoundIdentity() || undefined,
+        undefined,
+        err.description,
+      );
+    }
+    throw new FlowstaHolochainError(
+      err.description || 'Backup retrieve failed',
+      err.error || 'retrieve_failed',
+      err.description,
+    );
   }
 
   const result = await response.json();
@@ -873,7 +1164,7 @@ export async function wouldOverwriteNonEmptyBackup(
     ?.totalRecords;
   if (typeof total !== 'number' || total > 0) return false;
 
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
   let response: Response;
   try {
     const controller = new AbortController();
@@ -892,6 +1183,8 @@ export async function wouldOverwriteNonEmptyBackup(
     return true; // probe failed - when in doubt, don't overwrite
   }
   if (response.status === 404) return false; // first-ever backup
+  // Any other non-OK blocks: 409 identity_mismatch means the slot holds
+  // ANOTHER identity's backup - the strongest possible reason not to write.
   if (!response.ok) return true;
 
   try {
@@ -911,9 +1204,10 @@ export async function wouldOverwriteNonEmptyBackup(
  * @returns Backup stats for all apps, or empty stats if vault is unavailable
  */
 export async function listVaultBackups(
-  ipcUrl = 'http://127.0.0.1:27777',
+  ipcUrl?: string,
 ): Promise<FlowstaBackupStats> {
   const empty: FlowstaBackupStats = { appCount: 0, totalBackups: 0, totalSize: 0, apps: [] };
+  ipcUrl = await resolveVaultUrl(ipcUrl);
 
   try {
     const controller = new AbortController();
@@ -1035,23 +1329,10 @@ export interface SignDocumentResult {
 export async function signDocument(
   options: SignDocumentOptions,
 ): Promise<SignDocumentResult> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
-  // Check Vault is running and unlocked
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const statusResponse = await fetch(`${ipcUrl}/status`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!statusResponse.ok) throw new VaultNotFoundError();
-    const status = await statusResponse.json();
-    if (!status.unlocked) throw new VaultLockedError();
-  } catch (err) {
-    if (err instanceof FlowstaHolochainError) throw err;
-    throw new VaultNotFoundError();
-  }
+  // Running + unlocked + bound-identity assertion (one insertion point).
+  await requireUnlockedVault(ipcUrl);
 
   // Request document signature
   const controller = new AbortController();
@@ -1163,21 +1444,11 @@ export async function authenticateWithVault(
   challenge: string,
   options: AuthenticateWithVaultOptions = {},
 ): Promise<AuthenticateWithVaultResult> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
-  // Status pre-check (fast) so we surface locked/absent before the long call.
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const statusResponse = await fetch(`${ipcUrl}/status`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!statusResponse.ok) throw new VaultNotFoundError();
-    const status = await statusResponse.json();
-    if (!status.unlocked) throw new VaultLockedError();
-  } catch (err) {
-    if (err instanceof FlowstaHolochainError) throw err;
-    throw new VaultNotFoundError();
-  }
+  // Status pre-check (fast) so we surface locked/absent/wrong-identity
+  // before the long approval call.
+  await requireUnlockedVault(ipcUrl);
 
   // base64(challenge UTF-8 bytes) — see the encoding contract above.
   const challengeBytes = new TextEncoder().encode(challenge);
@@ -1247,8 +1518,9 @@ export async function authenticateWithVault(
  * ```
  */
 export async function getSigningStatus(
-  ipcUrl = 'http://127.0.0.1:27777',
+  ipcUrl?: string,
 ): Promise<{ available: boolean; vaultRunning: boolean; vaultUnlocked: boolean }> {
+  ipcUrl = await resolveVaultUrl(ipcUrl);
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -1623,6 +1895,12 @@ const _restoresInProgress: Set<string> = new Set();
  * the rest of the records and surfaces failures in the returned result.
  * If EVERY record fails, the dispatcher itself is broken and a
  * `DispatcherFailedError` is thrown instead.
+ *
+ * v3: `{totalRecords: 0}` now means a CONFIRMED absent backup and nothing
+ * else. An unreachable Vault throws `VaultNotFoundError`, a locked Vault
+ * `VaultLockedError`, a slot under another identity `IdentityMismatchError`,
+ * an unreadable slot `FlowstaHolochainError` - all previously collapsed
+ * into a silent zero-record "success".
  */
 export async function restoreFromVault(
   options: RestoreFromVaultOptions,
@@ -1828,19 +2106,15 @@ export function startAutoBackup(
       const status = await getVaultStatus(v2.ipcUrl);
       if (!status.running) return;
       const payload = await buildBackupPayload(v2);
-      if (
-        (v2.protectNonEmpty ?? true) &&
-        (await wouldOverwriteNonEmptyBackup(v2, payload))
-      ) {
-        v2.onError?.(new EmptyBackupSkippedError());
-        return;
-      }
+      // protectNonEmpty is enforced inside backupToVault (v3);
+      // EmptyBackupSkippedError reaches onError through the catch below.
       const result = await backupToVault(
         {
           clientId: v2.clientId,
           appName: v2.appName,
           label: v2.label,
           ipcUrl: v2.ipcUrl,
+          protectNonEmpty: v2.protectNonEmpty,
         },
         payload,
       );
@@ -1895,19 +2169,14 @@ function startAutoBackupLegacy(config: FlowstaAutoBackupConfig): () => void {
       const status = await getVaultStatus(config.ipcUrl);
       if (!status.running) return;
       const data = await config.getData();
-      if (
-        (config.protectNonEmpty ?? true) &&
-        (await wouldOverwriteNonEmptyBackup(config, data))
-      ) {
-        config.onError?.(new EmptyBackupSkippedError());
-        return;
-      }
+      // protectNonEmpty is enforced inside backupToVault (v3).
       const result = await backupToVault(
         {
           clientId: config.clientId,
           appName: config.appName,
           label: config.label,
           ipcUrl: config.ipcUrl,
+          protectNonEmpty: config.protectNonEmpty,
         },
         data,
       );
