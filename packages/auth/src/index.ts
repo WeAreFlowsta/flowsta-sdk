@@ -110,6 +110,78 @@ export class UserDeniedError extends FlowstaAuthError {
   }
 }
 
+/**
+ * The local Vault is signed in to a DIFFERENT identity than this session.
+ * Signing through it would attribute the signature to the wrong person, so
+ * the call refuses instead. Tell the user to switch the Vault to the
+ * account they are signed in with here (or sign in here as the Vault's
+ * identity).
+ */
+export class VaultIdentityMismatchError extends FlowstaAuthError {
+  constructor(
+    public readonly sessionAgentPubKey?: string,
+    public readonly vaultAgentPubKey?: string,
+  ) {
+    super(
+      'The Flowsta Vault on this machine holds a different identity than the ' +
+        'signed-in account. Switch the Vault to this account and try again.',
+      'vault_identity_mismatch',
+    );
+    this.name = 'VaultIdentityMismatchError';
+  }
+}
+
+// Agent keys appear as uhCAk + base64url (Vault /status) and uhCAk + base58
+// (session /auth/me), so a string compare false-mismatches. Compare through
+// bytes; when either form fails to decode, abstain (null) - refusal requires
+// a DEFINITE mismatch.
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58DecodeKey(s: string): Uint8Array | null {
+  let n = 0n;
+  for (const c of s) {
+    const v = BASE58_ALPHABET.indexOf(c);
+    if (v < 0) return null;
+    n = n * 58n + BigInt(v);
+  }
+  const bytes: number[] = [];
+  while (n > 0n) {
+    bytes.unshift(Number(n & 0xffn));
+    n >>= 8n;
+  }
+  for (const c of s) {
+    if (c === '1') bytes.unshift(0);
+    else break;
+  }
+  return Uint8Array.from(bytes);
+}
+
+function agentKeyBytes(key: string): Uint8Array | null {
+  if (!key || !key.startsWith('u')) return null;
+  const body = key.slice(1);
+  const plausible = (b: Uint8Array | null): b is Uint8Array =>
+    !!b && b.length === 39 && b[0] === 0x84 && b[1] === 0x20 && b[2] === 0x24;
+  try {
+    const bin = atob(body.replace(/-/g, '+').replace(/_/g, '/'));
+    const b = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    if (plausible(b)) return b;
+  } catch {
+    // fall through to base58
+  }
+  const b58 = base58DecodeKey(body);
+  return plausible(b58) ? b58 : null;
+}
+
+/** true = same key, false = definitely different, null = cannot compare. */
+export function agentKeysMatch(a: string, b: string): boolean | null {
+  if (a === b) return true;
+  const ba = agentKeyBytes(a);
+  const bb = agentKeyBytes(b);
+  if (!ba || !bb) return null;
+  return ba.every((v, i) => v === bb[i]);
+}
+
 export interface AuthState {
   /** Whether the user is authenticated */
   isAuthenticated: boolean;
@@ -372,37 +444,42 @@ export class FlowstaAuth {
 
   // ── Vault Detection ──────────────────────────────────────────────
 
+  /** Resolved Vault IPC base URL from the last successful detectVault sweep. */
+  private vaultUrl: string | null = null;
+
   /**
    * Detect whether Flowsta Vault (desktop app) is running.
    *
-   * Probes the IPC server at localhost:27777. If running and unlocked,
+   * Sweeps the IPC server ports 27777-27779 (the Vault takes the next port
+   * up when 27777 is held by another instance). If running and unlocked,
    * signing can be done locally instead of via the API.
    *
    * @returns Detection result with running status and agent info
    */
   async detectVault(): Promise<VaultDetectionResult> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000);
-
-      const response = await fetch('http://127.0.0.1:27777/status', {
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        return { running: false };
+    const candidates = this.vaultUrl
+      ? [this.vaultUrl, ...[27777, 27778, 27779].map((p) => `http://127.0.0.1:${p}`).filter((u) => u !== this.vaultUrl)]
+      : [27777, 27778, 27779].map((p) => `http://127.0.0.1:${p}`);
+    for (const url of candidates) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const response = await fetch(`${url}/status`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (!response.ok) continue;
+        const data = await response.json();
+        this.vaultUrl = url;
+        return {
+          running: true,
+          agentPubKey: data.agent_pub_key || data.agentPubKey,
+          did: data.did,
+        };
+      } catch {
+        continue;
       }
-
-      const data = await response.json();
-      return {
-        running: true,
-        agentPubKey: data.agent_pub_key || data.agentPubKey,
-        did: data.did,
-      };
-    } catch {
-      return { running: false };
     }
+    this.vaultUrl = null;
+    return { running: false };
   }
 
   // ── Agent Linking ────────────────────────────────────────────────
@@ -494,6 +571,16 @@ export class FlowstaAuth {
     // Vault UI and the key never leaves their machine.
     const vault = await this.detectVault();
     if (vault.running) {
+      // Refuse when the local Vault DEFINITELY holds a different identity
+      // than this session — its signature would be attributed to the wrong
+      // person. Abstains when either key is unreadable (never false-refuse).
+      if (
+        this.user?.agentPubKey &&
+        vault.agentPubKey &&
+        agentKeysMatch(this.user.agentPubKey, vault.agentPubKey) === false
+      ) {
+        throw new VaultIdentityMismatchError(this.user.agentPubKey, vault.agentPubKey);
+      }
       return this.signFileViaVault(options);
     }
 
@@ -535,7 +622,7 @@ export class FlowstaAuth {
     // 60s Vault approval timeout + buffer
     const timeout = setTimeout(() => controller.abort(), 70000);
     try {
-      const response = await fetch('http://127.0.0.1:27777/sign-document', {
+      const response = await fetch(`${this.vaultUrl || 'http://127.0.0.1:27777'}/sign-document`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
