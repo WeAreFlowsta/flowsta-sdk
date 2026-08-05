@@ -190,7 +190,7 @@ See the full [Sign It documentation](https://docs.flowsta.com/sign-it/) for fiel
 const auth = new FlowstaAuth({
   clientId: string;      // Required: Your app's client ID
   redirectUri: string;   // Required: OAuth callback URL
-  scopes?: string[];     // Optional: default ['openid', 'email', 'display_name']
+  scopes?: string[];     // Optional: default ['openid', 'display_name'] - email is opt-in at both ends (v2.3.2+)
   loginUrl?: string;     // Optional: Flowsta login URL
   apiUrl?: string;       // Optional: Flowsta API URL
 });
@@ -207,10 +207,10 @@ const auth = new FlowstaAuth({
 | `getUser()` | `FlowstaUser \| null` | Get current user |
 | `getAccessToken()` | `string \| null` | Get access token |
 | `getState()` | `AuthState` | Get full auth state |
-| `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally |
+| `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally (sweeps ports 27777-27779 and caches the answer, v2.4.0) |
 | `getLinkedAgents(agentPubKey?)` | `Promise<string[]>` | Get agents linked to current user or a specific agent |
 | `areAgentsLinked(agentA, agentB)` | `Promise<boolean>` | Check if two agents are linked |
-| `signFile(options)` | `Promise<SignResult>` | Sign a file hash (requires `sign` scope). Signs through Flowsta Vault when it's running (the user approves in the Vault); falls back to the API for legacy custodial accounts. Throws `VaultRequiredError` when neither can sign. The file is never uploaded. |
+| `signFile(options)` | `Promise<SignResult>` | Sign a file hash (requires `sign` scope). Signs through Flowsta Vault when it's running (the user approves in the Vault); falls back to the API for legacy custodial accounts. Throws `VaultRequiredError` when neither can sign, and `VaultIdentityMismatchError` (v2.4.0) when the local Vault holds a DIFFERENT identity than the signed-in user - a signature must never come from someone else's Vault. The file is never uploaded. |
 | `signBatch(options)` | `Promise<SignBatchResult>` | Sign multiple hashes in one request (legacy custodial API only — with the Vault, call `signFile()` per file so the user approves each) |
 | `verifyFile(hash)` | `Promise<VerifyResult>` | Check if a hash has been signed. Public endpoint. |
 | `getContentRights(hash)` | `Promise<ContentRightsResult>` | Return just the declared content-rights for a hash |
@@ -220,6 +220,17 @@ const auth = new FlowstaAuth({
 | Export | Returns | Description |
 |--------|---------|-------------|
 | `hashFile(file)` | `Promise<string>` | SHA-256 hex hash of a File, computed entirely in the browser |
+| `agentKeysMatch(a, b)` | `boolean \| null` | Compare two agent keys across their base64url and base58 encodings (`uhCAk...` appears in both). `null` = can't decode either side (v2.4.0) |
+
+#### Errors
+
+All errors extend `FlowstaAuthError` (which carries `.code`):
+
+| Error | When | Suggested UX |
+|-------|------|--------------|
+| `VaultRequiredError` | Signing requested but no Vault can sign for this account | "Install or unlock Flowsta Vault" |
+| `VaultIdentityMismatchError` _(2.4.0)_ | The local Vault is signed in as a different identity than this session's user - refused before any signature is made | "Unlock the Vault for THIS account, or sign out" |
+| `UserDeniedError` | The user rejected the request in the Vault | "Signing cancelled" |
 
 ### FlowstaUser
 

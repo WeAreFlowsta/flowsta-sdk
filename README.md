@@ -11,9 +11,9 @@ Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| **[@flowsta/auth](./packages/auth)** ⭐ | `2.3.2` | Core OAuth SDK + Sign It (file signing & verification) |
+| **[@flowsta/auth](./packages/auth)** ⭐ | `2.4.0` | Core OAuth SDK + Sign It (file signing & verification) |
 | **[@flowsta/login-button](./packages/login-button)** | `0.1.6` | Pre-built button components |
-| **[@flowsta/holochain](./packages/holochain)** | `2.6.0` | Vault agent linking, backups, Sign It document signing, rich link status |
+| **[@flowsta/holochain](./packages/holochain)** | `3.0.0` | Vault agent linking, backups + reinstall recovery, Sign It document signing, identity binding, relay login. v3 is a breaking release - see [Migrating to v3](./packages/holochain/README.md#migrating-to-v3) |
 
 ## 🚀 Getting Started
 
@@ -45,7 +45,7 @@ Supports: **React**, **Vue**, **Qwik**, **Vanilla JS**
 #### Option 3: No Build Tools?
 
 Use vanilla JavaScript without npm:
-- 📖 [Complete Vanilla JS Guide](https://docs.flowsta.com/oauth/vanilla-js)
+- 📖 [Complete Vanilla JS Guide](https://docs.flowsta.com/auth/vanilla-js)
 - 🎨 [Download Button Assets](https://docs.flowsta.com/sdk/buttons)
 
 ## Core SDK Features
@@ -120,7 +120,7 @@ Perfect for static HTML sites or simple projects:
 </html>
 ```
 
-**[View Complete Vanilla JS Guide →](https://docs.flowsta.com/oauth/vanilla-js)**
+**[View Complete Vanilla JS Guide →](https://docs.flowsta.com/auth/vanilla-js)**
 
 ### React with Hooks
 
@@ -251,25 +251,27 @@ After authentication, you'll receive a `FlowstaUser` object with the requested s
 
 ```typescript
 interface FlowstaUser {
-  sub: string;              // Unique user ID (always available)
-  display_name?: string;    // Display name (if 'display_name' scope)
-  username?: string;        // Username (if 'username' scope)
-  email?: string;           // Email (if 'email' scope)
-  email_verified?: boolean; // Email verification status
-  profile_picture?: string; // Profile picture URL (if 'profile_picture' scope)
-  agent_pub_key?: string;   // Holochain agent key (if 'public_key' scope)
-  did?: string;             // Decentralized ID (if 'did' scope)
+  id: string;                  // Unique user ID (always available)
+  displayName?: string;        // Display name (if 'display_name' scope)
+  username?: string;           // Username (if 'username' scope)
+  email?: string;              // Legacy custodial accounts only - device-hosted
+                               // accounts never expose an email
+  profilePicture?: string;     // Profile picture URL (if 'profile_picture' scope)
+  agentPubKey?: string;        // Holochain agent key (if 'public_key' scope)
+  did?: string;                // Decentralized ID (if 'did' scope)
+  linkedAgents?: LinkedAgent[];// Linked agents (DHT-verified)
 }
 ```
 
 **Available Scopes:**
 - `openid` - Required, provides user ID
-- `email` - User's email address
+- `email` - User's email address (opt-in at both ends; not in the default scopes)
 - `display_name` - User's display name
 - `username` - User's @username
 - `profile_picture` - Profile picture URL
 - `public_key` - Holochain agent public key
 - `did` - W3C Decentralized Identifier
+- `holochain` - Vault agent linking for Holochain apps
 
 ## 🔐 What is Flowsta?
 
@@ -293,11 +295,11 @@ Flowsta provides **zero-knowledge authentication** powered by Holochain:
 
 ### Official Docs
 - **[Getting Started Guide](https://docs.flowsta.com/getting-started/)** - Complete setup tutorial
-- **[OAuth Quickstart](https://docs.flowsta.com/oauth/quickstart)** - NPM integration guide
-- **[Vanilla JS Guide](https://docs.flowsta.com/oauth/vanilla-js)** - No build tools required
+- **[OAuth Quickstart](https://docs.flowsta.com/auth/quickstart)** - NPM integration guide
+- **[Vanilla JS Guide](https://docs.flowsta.com/auth/vanilla-js)** - No build tools required
 - **[Button Downloads](https://docs.flowsta.com/sdk/buttons)** - Download button assets
-- **[API Reference](https://docs.flowsta.com/oauth/api-reference)** - Complete API docs
-- **[Security Guide](https://docs.flowsta.com/oauth/security)** - Best practices
+- **[API Reference](https://docs.flowsta.com/auth/api-reference)** - Complete API docs
+- **[Security Guide](https://docs.flowsta.com/auth/security)** - Best practices
 
 ### Package READMEs
 - [@flowsta/auth](./packages/auth/README.md) - Core SDK documentation
@@ -330,8 +332,7 @@ npm run build
 ```bash
 npm run build       # Build all packages
 npm run dev         # Watch mode for development
-npm run test        # Run tests (coming soon)
-npm run lint        # Lint code (coming soon)
+npm run test        # Run tests (vitest; @flowsta/holochain carries the suite)
 ```
 
 ### Package Structure

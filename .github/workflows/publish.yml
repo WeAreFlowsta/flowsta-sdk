@@ -94,13 +94,15 @@ jobs:
           fi
       
       - name: Create GitHub Release
-        if: github.event.inputs.version-bump != 'none'
-        uses: actions/create-release@v1
+        # Single-package bumps only: "all" would need one release per package,
+        # and the old step referenced a `steps.version` that never existed -
+        # every release resolved to the same "<package>-v" tag.
+        if: github.event.inputs.version-bump != 'none' && github.event.inputs.package != 'all'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.event.inputs.package }}-v${{ steps.version.outputs.version }}
-          release_name: Release ${{ github.event.inputs.package }} v${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: false
+        run: |
+          VERSION=$(node -p "require('./packages/${{ github.event.inputs.package }}/package.json').version")
+          gh release create "${{ github.event.inputs.package }}-v${VERSION}" \
+            --title "Release ${{ github.event.inputs.package }} v${VERSION}" \
+            --notes "See packages/${{ github.event.inputs.package }}/CHANGELOG.md"
 

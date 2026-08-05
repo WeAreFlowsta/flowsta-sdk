@@ -25,7 +25,7 @@ v3 makes wrong-identity and error states impossible to mistake for "no data". Tw
 
 New in v3, no code needed:
 
-- **Identity binding** — `linkFlowstaIdentity` records the Vault identity it linked with (persisted in `localStorage` where available) and every later Vault call refuses on a definite mismatch. `bindVaultIdentity()` / `getBoundIdentity()` / `clearBoundIdentity()` are exported for apps that manage links themselves, `onIdentityChanged(cb)` polls for Vault account switches (UX only - every call asserts independently), and `agentKeysMatch(a, b)` compares agent keys across their base64url and base58 encodings.
+- **Identity binding** — `linkFlowstaIdentity` records the Vault identity it linked with (persisted in `localStorage` where available), and the write-shaped calls - `backupToVault`, `signDocument`, `authenticateWithVault` - refuse on a definite mismatch. `retrieveFromVault` relies on the Vault's own 409 answer instead (older Vaults without that response can't flag wrong-identity reads). `bindVaultIdentity()` / `getBoundIdentity()` / `clearBoundIdentity()` are exported for apps that manage links themselves, `onIdentityChanged(cb)` polls for Vault account switches (UX only - the asserting calls check independently), and `agentKeysMatch(a, b)` compares agent keys across their base64url and base58 encodings.
 - **Port sweep** — when no `ipcUrl` is given, calls resolve the Vault across ports 27777-27779 instead of assuming 27777 (a second Vault instance shifts ports; "absent" used to fail open).
 
 ## Installation
@@ -71,7 +71,7 @@ Request an agent-linking signature from Flowsta Vault. Shows an approval dialog 
 | `appName` | `string` | Yes | Shown in Vault approval dialog |
 | `clientId` | `string` | Yes | From dev.flowsta.com |
 | `localAgentPubKey` | `string` | Yes | Your agent's pubkey (`uhCAk...` format) |
-| `ipcUrl` | `string` | No | Default: `http://127.0.0.1:27777` |
+| `ipcUrl` | `string` | No | Default: sweeps `127.0.0.1:27777-27779` for the Vault (v3) |
 
 Returns `{ success: true, payload: { vaultAgentPubKey, vaultSignature } }`.
 
@@ -106,7 +106,10 @@ await backupToVault(
 | `appName` | `string` | Yes | Shown in Vault UI |
 | `label` | `string` | No | Named backup (overwrites same label). Omit for auto-versioned snapshots |
 | `contentType` | `string` | No | Default: `application/json` |
-| `ipcUrl` | `string` | No | Default: `http://127.0.0.1:27777` |
+| `protectNonEmpty` | `boolean` | No | Default: `true` (v3). Refuse to replace a non-empty backup with an empty canonical payload - throws `EmptyBackupSkippedError` |
+| `ipcUrl` | `string` | No | Default: sweeps `127.0.0.1:27777-27779` for the Vault (v3) |
+
+Throws `EmptyBackupSkippedError` on a refused empty overwrite (see `protectNonEmpty`) and `IdentityMismatchError` when a bound identity doesn't match the Vault's.
 
 ### `startAutoBackup(config)` _(canonical-shape, v2.4.0+)_
 
@@ -145,7 +148,7 @@ controller.stop();
 
 You provide one Tauri command, `decode_record_for_export`, with one `match` arm per entry type. Each arm decodes the entry's MessagePack bytes with `rmp_serde::from_slice` and converts to JSON via `serde_json::to_value(struct)` — leveraging the existing `#[derive(Serialize)]` on your entry structs. See [docs.flowsta.com/sdk/holochain#backups](https://docs.flowsta.com/sdk/holochain#backups) for the full code.
 
-**Non-empty backup protection (v2.6.0+, on by default).** Auto-backup fires immediately on start — including the first start after a reinstall or on a new device, when the source chain is still empty but the user's Vault holds their real backup. Writing that empty payload would destroy the Vault copy (records AND any keys the payload carries) before the user has recovered anything. `startAutoBackup` now probes the existing backup first and skips the write when the new payload has zero user records but the Vault copy doesn't; `onError` receives an `EmptyBackupSkippedError` (code `empty_backup_skipped`) so you can tell the skip apart from a real failure. The next non-empty backup writes normally. Set `protectNonEmpty: false` only if your app intentionally writes empty canonical payloads. Apps that post with `backupToVault` directly can run the same check via `wouldOverwriteNonEmptyBackup(options, payload)`.
+**Non-empty backup protection (on by default; guards every write since v3).** Auto-backup fires immediately on start — including the first start after a reinstall or on a new device, when the source chain is still empty but the user's Vault holds their real backup. Writing that empty payload would destroy the Vault copy (records AND any keys the payload carries) before the user has recovered anything. Since v3 the guard lives inside `backupToVault` itself, so EVERY write is protected — auto-backup, direct calls, everything: a canonical payload with zero user records that would replace a non-empty backup throws `EmptyBackupSkippedError` (code `empty_backup_skipped`); in `startAutoBackup` it arrives via `onError` so you can tell the skip apart from a real failure. The next non-empty backup writes normally. Set `protectNonEmpty: false` only if your app intentionally writes empty canonical payloads. `wouldOverwriteNonEmptyBackup(options, payload)` remains exported for apps that want the probe's answer without attempting a write.
 
 **Legacy `getData` signature (backwards-compatible).** Pass a `getData()` callback that returns the backup data directly. Returns a `stop()` function. Use this for apps that build the payload themselves on the Rust side (see [the Rust-side alternative](https://docs.flowsta.com/sdk/holochain#rust-side-alternative-for-app-websocket-apps) in the docs):
 
@@ -320,6 +323,7 @@ Throws:
 - `VaultLockedError` — Vault is running but locked
 - `UserDeniedError` — User rejected the request
 - `SigningDnaNotInstalledError` — Vault is too old
+- `IdentityMismatchError` — the Vault holds a different identity than the one this app is bound to (v3)
 
 Your app must be linked in the Vault (via `linkFlowstaIdentity`) and origin-stable across calls — `/sign-document` is gated on caller origin matching a linked app.
 
@@ -350,7 +354,8 @@ Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the us
 | `DispatcherFailedError` _(2.4.0)_ | A `restoreFromVault` dispatcher threw on a record | Surface in the restore summary; offer retry |
 | `RestoreInProgressError` _(2.4.0)_ | Concurrent `restoreFromVault` calls collided | Disable the restore button while one is running |
 | `DecodeFailedError` _(2.4.0)_ | `decodeRecordForExport` threw on an entry | Backup continues; record carries `_warning: "decode_failed"` |
-| `EmptyBackupSkippedError` _(2.6.0)_ | Auto-backup skipped: empty payload would overwrite a non-empty Vault backup | Not a failure — finish recovery; the next non-empty backup writes normally |
+| `EmptyBackupSkippedError` _(3.0.0: every write; introduced 2.6.0)_ | A backup write was refused: an empty payload would overwrite a non-empty Vault backup | Not a failure — finish recovery; the next non-empty backup writes normally |
+| `IdentityMismatchError` _(3.0.0)_ | The Vault's active identity differs from the one this app is bound to (writes), or a backup doesn't decrypt under the active identity (reads, Vault 409) | "Unlock the matching Vault, or sign in again" |
 
 ```typescript
 import { linkFlowstaIdentity, VaultNotFoundError, UserDeniedError } from '@flowsta/holochain';
