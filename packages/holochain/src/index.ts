@@ -1436,9 +1436,12 @@ export interface AuthenticateWithVaultOptions {
  * make Vault sign the base64-decode of the string (garbage) and the
  * server verification would fail.
  *
- * Desktop + Chromium only for now: the call targets `http://127.0.0.1`
- * from an HTTPS page; Chromium exempts loopback from mixed-content
- * blocking, Firefox/Safari are unreliable (ship a fallback — E2).
+ * Browser reach (verified 2026-08): the call targets `http://127.0.0.1`
+ * from an HTTPS page. Firefox and Chromium allow it (Chrome 142+ behind a
+ * Local Network Access permission prompt; a denial fails like "no Vault").
+ * Safari blocks loopback as mixed content, Brave blocks it silently unless
+ * the site is on Brave's allowlist, phones have no Vault - use the relay
+ * login for those.
  */
 export async function authenticateWithVault(
   challenge: string,
@@ -1547,13 +1550,14 @@ export async function getSigningStatus(
 // ── Relay login ─────────────────────────────────────────────────────
 //
 // For browsers that cannot reach a local Vault over the 127.0.0.1
-// loopback: phones (no Vault on the device) and Firefox/Safari desktop
-// (mixed-content blocks the loopback). The browser and the user's
-// desktop Vault meet at the auth-api:
+// loopback: phones (no Vault on the device), Safari (mixed-content
+// blocks the loopback) and Brave (silent localhost block). Firefox and
+// Chromium CAN reach it - use authenticateWithVault there. The browser
+// and the user's desktop Vault meet at the auth-api:
 //
 //   1. startRelayLogin() -> the API mints a short user code
 //   2. show the code (phone: user types it into their desktop Vault;
-//      desktop non-Chromium: openVaultDeepLink() hands it to Vault via
+//      Safari/Brave desktop: openVaultDeepLink() hands it to Vault via
 //      flowsta:// — ALWAYS render the typed-code fallback too, deep-link
 //      success is not detectable from the page)
 //   3. the user approves in Vault; poll() resolves with the session
@@ -1632,7 +1636,7 @@ export async function startRelayLogin(
 
 /**
  * Hand a relay code to a locally-installed Vault via the flowsta://
- * deep link (Firefox/Safari desktop path). Fire-and-forget: there is NO
+ * deep link (Safari/Brave desktop path). Fire-and-forget: there is NO
  * way to detect whether the link was handled — always show the typed-code
  * fallback alongside ("Vault didn't open? Enter this code in your Vault").
  */
