@@ -56,6 +56,24 @@ export class VaultNotFoundError extends FlowstaHolochainError {
   }
 }
 
+/**
+ * The BROWSER refused to let this page reach the Vault's loopback address -
+ * Chrome 142+'s Local Network Access permission was denied (or Brave's
+ * localhost block). The Vault may well be running; the page just can't see
+ * it. Don't tell the user to install a Vault they have: point them at the
+ * browser's site settings (Chrome: Privacy and security → Site settings →
+ * Local network access / "Apps on device") or offer relay login.
+ */
+export class VaultBlockedError extends FlowstaHolochainError {
+  constructor() {
+    super(
+      'The browser blocked this page from reaching Flowsta Vault on this computer (local network access permission). Allow it in the browser\'s site settings, or sign in with a relay code.',
+      'vault_blocked',
+    );
+    this.name = 'VaultBlockedError';
+  }
+}
+
 export class VaultLockedError extends FlowstaHolochainError {
   constructor() {
     super(
@@ -344,11 +362,45 @@ function assertBoundIdentity(vaultAgentPubKey: string | undefined): void {
 const VAULT_PORTS = [27777, 27778, 27779];
 let _resolvedVaultUrl: string | null = null;
 
+/**
+ * Fetch options that let an https page call the Vault's http://127.0.0.1
+ * bridge under Chrome's Local Network Access rules (declaring the target
+ * exempts the request from mixed-content checks). Ignored elsewhere.
+ */
+const LOOPBACK_FETCH_INIT = { targetAddressSpace: 'loopback' } as object;
+
+/**
+ * What the browser has decided about this page reaching the loopback.
+ * Chrome 142+ gates public-origin → 127.0.0.1 requests behind a permission
+ * ('loopback-network' from Chrome 145, 'local-network-access' before);
+ * Firefox runs the same check in auto-allow mode; other browsers and
+ * desktop apps answer `'unknown'`. A denial makes every Vault call fail
+ * exactly like an absent Vault - this is how the SDK tells them apart.
+ * _(3.1.0)_
+ */
+export async function loopbackPermissionState(): Promise<'granted' | 'denied' | 'prompt' | 'unknown'> {
+  try {
+    const perms = (globalThis as any).navigator?.permissions;
+    if (!perms?.query) return 'unknown';
+    for (const name of ['loopback-network', 'local-network-access']) {
+      try {
+        const st = await perms.query({ name });
+        if (st?.state) return st.state;
+      } catch {
+        /* name not supported here - try the next */
+      }
+    }
+  } catch {
+    /* no Permissions API */
+  }
+  return 'unknown';
+}
+
 async function probeStatus(url: string, timeoutMs = 1500): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const r = await fetch(`${url}/status`, { signal: controller.signal });
+    const r = await fetch(`${url}/status`, { signal: controller.signal, ...LOOPBACK_FETCH_INIT });
     clearTimeout(timeout);
     return r.ok;
   } catch {
@@ -382,12 +434,14 @@ export async function resolveVaultUrl(ipcUrl?: string): Promise<string> {
  * One insertion point for the running/unlocked/identity checks the signing
  * and linking calls all share. Returns the parsed status on success.
  *
+ * @throws {VaultBlockedError} the browser refused the loopback request (3.1.0)
  * @throws {VaultNotFoundError} not running / unreachable
  * @throws {VaultLockedError} running but locked
  * @throws {IdentityMismatchError} unlocked under a definitely different identity
  */
 async function requireUnlockedVault(ipcUrl: string): Promise<VaultStatus> {
   const status = await getVaultStatus(ipcUrl);
+  if (status.blocked) throw new VaultBlockedError();
   if (!status.running) throw new VaultNotFoundError();
   if (!status.unlocked) throw new VaultLockedError();
   assertBoundIdentity(status.agentPubKey);
@@ -572,6 +626,10 @@ export interface VaultStatus {
   running: boolean;
   /** Whether the vault is unlocked */
   unlocked: boolean;
+  /** `true` when `running` is false because the BROWSER refused the loopback
+   *  request (Local Network Access permission denied), not because nothing
+   *  answered. The Vault may be running; the page cannot see it. _(3.1.0)_ */
+  blocked?: boolean;
   /** Agent public key (if unlocked) */
   agentPubKey?: string;
   /** Display name of the currently-unlocked Flowsta account.
@@ -631,7 +689,8 @@ export type FlowstaLinkStatus =
  * Check the status of Flowsta Vault.
  *
  * @param ipcUrl - Vault IPC URL. Default: sweep ports 27777-27779.
- * @returns Vault status (running, unlocked, agentPubKey, version)
+ * @returns Vault status (running, unlocked, agentPubKey, version; `blocked`
+ *   when the browser refused the loopback request - 3.1.0)
  */
 export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
   const url = await resolveVaultUrl(ipcUrl);
@@ -641,6 +700,7 @@ export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
 
     const response = await fetch(`${url}/status`, {
       signal: controller.signal,
+      ...LOOPBACK_FETCH_INIT,
     });
     clearTimeout(timeout);
 
@@ -659,6 +719,11 @@ export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
       version: data.version,
     };
   } catch {
+    // A network error is either nothing listening OR the browser refusing
+    // the loopback (Local Network Access). Ask before reporting "not running".
+    if ((await loopbackPermissionState()) === 'denied') {
+      return { running: false, unlocked: false, blocked: true };
+    }
     return { running: false, unlocked: false };
   }
 }

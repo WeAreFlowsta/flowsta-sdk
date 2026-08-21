@@ -207,13 +207,17 @@ const auth = new FlowstaAuth({
 | `getUser()` | `FlowstaUser \| null` | Get current user |
 | `getAccessToken()` | `string \| null` | Get access token |
 | `getState()` | `AuthState` | Get full auth state |
-| `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally (sweeps ports 27777-27779 and caches the answer, v2.4.0) |
+| `detectVault()` | `Promise<VaultDetectionResult>` | Check if Flowsta Vault is running locally (sweeps ports 27777-27779 and caches the answer, v2.4.0). Since v2.5.0 the result carries `blocked: true` when the BROWSER refused the loopback request (Chrome 142+ Local Network Access permission, Brave) - the Vault may be running; don't tell the user to install one |
 | `getLinkedAgents(agentPubKey?)` | `Promise<string[]>` | Get agents linked to current user or a specific agent |
 | `areAgentsLinked(agentA, agentB)` | `Promise<boolean>` | Check if two agents are linked |
 | `signFile(options)` | `Promise<SignResult>` | Sign a file hash (requires `sign` scope). Signs through Flowsta Vault when it's running (the user approves in the Vault); falls back to the API for legacy custodial accounts. Throws `VaultRequiredError` when neither can sign, and `VaultIdentityMismatchError` (v2.4.0) when the local Vault holds a DIFFERENT identity than the signed-in user - a signature must never come from someone else's Vault. The file is never uploaded. |
 | `signBatch(options)` | `Promise<SignBatchResult>` | Sign multiple hashes in one request (legacy custodial API only — with the Vault, call `signFile()` per file so the user approves each) |
 | `verifyFile(hash)` | `Promise<VerifyResult>` | Check if a hash has been signed. Public endpoint. |
 | `getContentRights(hash)` | `Promise<ContentRightsResult>` | Return just the declared content-rights for a hash |
+
+#### Which browsers reach the Vault _(verified 2026-08)_
+
+`detectVault()` and Vault-first signing call `http://127.0.0.1` from your page. Chromium (Chrome 142+ behind a one-time Local Network Access prompt) and Firefox allow it; Safari blocks it (WebKit mixed-content), Brave blocks it silently unless the site is on Brave's allowlist, phones have no Vault. A denied permission looks like an absent Vault - `detectVault().blocked` / `VaultBlockedError` tell them apart (`loopbackPermissionState()` is exported too). For the non-reaching cases use the relay login in `@flowsta/holochain`.
 
 #### Utilities
 
@@ -229,6 +233,7 @@ All errors extend `FlowstaAuthError` (which carries `.code`):
 | Error | When | Suggested UX |
 |-------|------|--------------|
 | `VaultRequiredError` | Signing requested but no Vault can sign for this account | "Install or unlock Flowsta Vault" |
+| `VaultBlockedError` _(2.5.0)_ | The browser refused this page's request to reach the Vault (Local Network Access permission denied; Brave's localhost block) - the Vault may be running | "Allow this site to reach apps on your device in the browser's site settings" |
 | `VaultIdentityMismatchError` _(2.4.0)_ | The local Vault is signed in as a different identity than this session's user - refused before any signature is made | "Unlock the Vault for THIS account, or sign out" |
 | `UserDeniedError` | The user rejected the request in the Vault | "Signing cancelled" |
 

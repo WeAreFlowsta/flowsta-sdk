@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   agentKeysMatch,
+  authenticateWithVault,
   backupToVault,
+  getVaultStatus,
+  loopbackPermissionState,
+  VaultBlockedError,
   bindVaultIdentity,
   clearBoundIdentity,
   EmptyBackupSkippedError,
@@ -264,5 +268,77 @@ describe('onIdentityChanged', () => {
     vi.useRealTimers();
 
     expect(seen).toEqual([[b64url(KEY_B), b64url(KEY_A)]]);
+  });
+});
+
+// ── browser-blocked loopback (3.1.0) ───────────────────────────────
+
+function stubPermissions(state: 'granted' | 'denied' | 'prompt' | null, supported = ['loopback-network', 'local-network-access']) {
+  vi.stubGlobal('navigator', {
+    permissions: {
+      query: async ({ name }: { name: string }) => {
+        if (!supported.includes(name)) throw new TypeError(`${name} is not a valid permission name`);
+        if (state === null) throw new TypeError('no permission');
+        return { state };
+      },
+    },
+  });
+}
+
+describe('loopbackPermissionState', () => {
+  it('reads the new name first, falls back to the old one, else unknown', async () => {
+    stubPermissions('denied');
+    expect(await loopbackPermissionState()).toBe('denied');
+    stubPermissions('granted', ['local-network-access']);
+    expect(await loopbackPermissionState()).toBe('granted');
+    vi.stubGlobal('navigator', {});
+    expect(await loopbackPermissionState()).toBe('unknown');
+    vi.stubGlobal('navigator', undefined);
+    expect(await loopbackPermissionState()).toBe('unknown');
+  });
+});
+
+describe('getVaultStatus: blocked vs not running', () => {
+  it('network error + permission denied → blocked (the Vault may be running)', async () => {
+    stubPermissions('denied');
+    mockFetch(() => null);
+    await expect(getVaultStatus(IPC)).resolves.toEqual({ running: false, unlocked: false, blocked: true });
+  });
+
+  it('network error with no permission signal → plain not running', async () => {
+    vi.stubGlobal('navigator', {});
+    mockFetch(() => null);
+    await expect(getVaultStatus(IPC)).resolves.toEqual({ running: false, unlocked: false });
+  });
+
+  it('a non-2xx answer is a running-but-unhappy Vault, never blocked', async () => {
+    stubPermissions('denied');
+    mockFetch(() => json(503, {}));
+    await expect(getVaultStatus(IPC)).resolves.toEqual({ running: false, unlocked: false });
+  });
+
+  it('declares the loopback target so https pages pass Chrome mixed-content checks', async () => {
+    vi.stubGlobal('navigator', {});
+    const seen: RequestInit[] = [];
+    mockFetch((_u, init) => {
+      seen.push(init!);
+      return json(200, { unlocked: true, agent_pub_key: b64url(KEY_A) });
+    });
+    await getVaultStatus(IPC);
+    expect((seen[0] as any).targetAddressSpace).toBe('loopback');
+  });
+});
+
+describe('authenticateWithVault under a browser block', () => {
+  it('throws VaultBlockedError, not VaultNotFoundError', async () => {
+    stubPermissions('denied');
+    mockFetch(() => null);
+    await expect(authenticateWithVault('c', { ipcUrl: IPC })).rejects.toBeInstanceOf(VaultBlockedError);
+  });
+
+  it('still throws VaultNotFoundError when nothing is listening and the browser is not the reason', async () => {
+    vi.stubGlobal('navigator', {});
+    mockFetch(() => null);
+    await expect(authenticateWithVault('c', { ipcUrl: IPC })).rejects.toBeInstanceOf(VaultNotFoundError);
   });
 });

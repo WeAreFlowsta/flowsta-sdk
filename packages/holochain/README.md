@@ -229,13 +229,32 @@ Scopes are configured per `client_id` at [dev.flowsta.com](https://dev.flowsta.c
 
 ```typescript
 const status = await getVaultStatus();
-if (!status.running) {
+if (status.blocked) {
+  // 3.1.0: the BROWSER refused the loopback request (Chrome's Local
+  // Network Access permission). The Vault may be running - point the user
+  // at the browser's site settings, or offer relay login. Never "install".
+} else if (!status.running) {
   // Prompt user to open Flowsta Vault
 } else if (status.unlocked) {
   console.log(`Signed in as ${status.displayName ?? 'Flowsta Account'}`);
   if (status.webUsername) console.log(`@${status.webUsername}`);
 }
 ```
+
+### Which browsers reach the Vault _(verified 2026-08)_
+
+Every loopback call here targets `http://127.0.0.1` from your page. Who lets that through:
+
+| Browser | Reaches the Vault? | What to do |
+|---|---|---|
+| Chrome / Edge / other Chromium | **Yes, behind a permission** - Chrome 142+ asks "Look for and connect to any device on your local network" on the first request (Chrome 145+: "Apps on device"). | Nothing special to send; a denial surfaces as `status.blocked` / `VaultBlockedError` - show the settings path, not "install the Vault" |
+| Firefox | **Yes** (loopback exempt from mixed-content blocking since Firefox 55; its own Local Network Access check currently auto-allows) | Direct path |
+| Safari | **No** (WebKit treats loopback as mixed content) | `startRelayLogin` + `openVaultDeepLink` |
+| Brave | **No** unless the site is on Brave's allowlist (silent block; `navigator.brave.isBrave()` detects it) | Relay, or tell the user about `brave://settings/content/localhostAccess` |
+| Phones | No Vault on the device | `startRelayLogin` (typed code) |
+| Desktop apps (Tauri/Electron) | Yes | Direct path |
+
+`loopbackPermissionState()` _(3.1.0)_ returns `'granted' | 'denied' | 'prompt' | 'unknown'` if you want to explain the prompt before it appears.
 
 ### `getFlowstaLinkStatus(options)` _(2.3.0)_
 
@@ -345,6 +364,7 @@ Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the us
 | Error | When | Suggested UX |
 |-------|------|--------------|
 | `VaultNotFoundError` | Vault not running | "Install or start Flowsta Vault" |
+| `VaultBlockedError` _(3.1.0)_ | The browser refused the loopback request (Local Network Access permission denied; Brave's localhost block). The Vault may be running. | "Allow this site to reach apps on your device in the browser's site settings" - or offer relay login. Never "install the Vault" |
 | `VaultLockedError` | Vault is locked | "Please unlock your Flowsta Vault" |
 | `UserDeniedError` | User rejected dialog | "Identity linking cancelled" |
 | `InvalidClientIdError` | Bad client_id | "App not registered at dev.flowsta.com" |

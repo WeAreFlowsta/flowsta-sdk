@@ -72,6 +72,10 @@ export interface LinkedAgent {
 export interface VaultDetectionResult {
   /** Whether Flowsta Vault is running and reachable on localhost */
   running: boolean;
+  /** `true` when `running` is false because the BROWSER refused the loopback
+   *  request (Chrome 142+ Local Network Access permission denied, Brave's
+   *  localhost block) - the Vault may be running; the page can't see it. _(2.5.0)_ */
+  blocked?: boolean;
   /** The vault agent's public key (if unlocked) */
   agentPubKey?: string;
   /** The vault agent's DID (if unlocked) */
@@ -102,6 +106,22 @@ export class VaultRequiredError extends FlowstaAuthError {
   }
 }
 
+/**
+ * The browser refused to let this page reach Flowsta Vault on the loopback
+ * (Chrome 142+ Local Network Access permission denied; Brave's localhost
+ * block). The Vault may well be running. Point the user at the browser's
+ * site settings (Chrome: Privacy and security → Site settings → Local
+ * network access / "Apps on device") - never at "install the Vault". _(2.5.0)_
+ */
+export class VaultBlockedError extends FlowstaAuthError {
+  constructor(
+    message = 'The browser blocked this page from reaching Flowsta Vault on this computer (local network access permission). Allow it in the browser\'s site settings and try again.',
+  ) {
+    super(message, 'vault_blocked');
+    this.name = 'VaultBlockedError';
+  }
+}
+
 /** The user declined the request in the Flowsta Vault approval dialog. */
 export class UserDeniedError extends FlowstaAuthError {
   constructor(message = 'The user declined the request in Flowsta Vault.') {
@@ -129,6 +149,30 @@ export class VaultIdentityMismatchError extends FlowstaAuthError {
     );
     this.name = 'VaultIdentityMismatchError';
   }
+}
+
+/**
+ * What the browser has decided about this page reaching `127.0.0.1`.
+ * Chrome 142+ gates it behind a permission ('loopback-network' from Chrome
+ * 145, 'local-network-access' before); Firefox runs the same check in
+ * auto-allow mode; elsewhere `'unknown'`. _(2.5.0)_
+ */
+export async function loopbackPermissionState(): Promise<'granted' | 'denied' | 'prompt' | 'unknown'> {
+  try {
+    const perms = (globalThis as any).navigator?.permissions;
+    if (!perms?.query) return 'unknown';
+    for (const name of ['loopback-network', 'local-network-access']) {
+      try {
+        const st = await perms.query({ name });
+        if (st?.state) return st.state;
+      } catch {
+        /* not supported here - try the next name */
+      }
+    }
+  } catch {
+    /* no Permissions API */
+  }
+  return 'unknown';
 }
 
 // Agent keys appear as uhCAk + base64url (Vault /status) and uhCAk + base58
@@ -464,7 +508,12 @@ export class FlowstaAuth {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 2000);
-        const response = await fetch(`${url}/status`, { signal: controller.signal });
+        const response = await fetch(`${url}/status`, {
+          signal: controller.signal,
+          // Chrome Local Network Access: declaring the target keeps an https
+          // page's http://127.0.0.1 request exempt from mixed-content checks.
+          ...({ targetAddressSpace: 'loopback' } as object),
+        });
         clearTimeout(timeout);
         if (!response.ok) continue;
         const data = await response.json();
@@ -479,6 +528,12 @@ export class FlowstaAuth {
       }
     }
     this.vaultUrl = null;
+    // Nothing answered - or the browser refused every loopback request.
+    // Chrome 142+ (Local Network Access) and Brave make the two look
+    // identical; the Permissions API tells them apart where it exists.
+    if ((await loopbackPermissionState()) === 'denied') {
+      return { running: false, blocked: true };
+    }
     return { running: false };
   }
 
@@ -604,6 +659,9 @@ export class FlowstaAuth {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       if (this.user?.signingMode !== 'remote' || response.status === 403 || response.status >= 500) {
+        // The Vault is the only thing that can sign for this account. If the
+        // browser is what kept us from it, say THAT - not "install the Vault".
+        if (vault.blocked) throw new VaultBlockedError();
         throw new VaultRequiredError();
       }
       throw new FlowstaAuthError(data.message || 'Signing failed', data.error || 'signing_failed');
@@ -715,6 +773,7 @@ export class FlowstaAuth {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       if (this.user?.signingMode !== 'remote' || response.status === 403 || response.status >= 500) {
+        if (vault.blocked) throw new VaultBlockedError();
         throw new VaultRequiredError();
       }
       throw new FlowstaAuthError(data.message || 'Batch signing failed', data.error || 'signing_failed');

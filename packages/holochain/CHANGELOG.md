@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.0
+
+- Browser-blocked is no longer mistaken for not-running. Chrome 142+ gates a public page's requests to `127.0.0.1` behind a Local Network Access permission, and a denial used to look exactly like an absent Vault. `getVaultStatus` now returns `blocked: true` in that case, `requireUnlockedVault` (so `signDocument`, `authenticateWithVault`, `linkFlowstaIdentity`, backups) throws the new `VaultBlockedError` (`vault_blocked`) instead of `VaultNotFoundError`, and `loopbackPermissionState()` is exported for apps that want to explain the prompt up front.
+- Vault probes declare `targetAddressSpace: 'loopback'` so https pages stay exempt from mixed-content checks under Chrome's rules.
+- README gains a verified browser-reach table: Firefox reaches the Vault directly (the earlier "Firefox/Safari use relay" note was wrong); Safari, Brave and phones use the relay.
+
 ## 3.0.0
 
 **Breaking.** Wrong-identity and error states can no longer be mistaken for "no data". See [Migrating to v3](./README.md#migrating-to-v3) in the README.

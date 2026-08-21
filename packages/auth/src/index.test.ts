@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { agentKeysMatch } from './index';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { agentKeysMatch, FlowstaAuth, loopbackPermissionState, VaultBlockedError, VaultRequiredError } from './index';
 
 // Build a plausible 39-byte agent key (0x84 0x20 0x24 prefix + 32-byte key +
 // 4-byte DHT location) and render it in both encodings agent keys actually
@@ -74,5 +74,79 @@ describe('agentKeysMatch', () => {
 
   it('identical strings short-circuit to true even when undecodable', () => {
     expect(agentKeysMatch('uWEIRD', 'uWEIRD')).toBe(true);
+  });
+});
+
+// ── browser-blocked loopback (2.5.0) ───────────────────────────────
+
+function stubBrowser(opts: { permission: 'denied' | 'granted' | null; fetchOk?: boolean; apiStatus?: number; session?: boolean }) {
+  const store = new Map<string, string>();
+  if (opts.session) {
+    store.set('flowsta_access_token', 'tok');
+    store.set('flowsta_user', JSON.stringify({ id: 'u1', agentPubKey: 'uhCAkKEY', hostingModel: 'device-hosted' }));
+  }
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  });
+  vi.stubGlobal('navigator', {
+    permissions:
+      opts.permission === null
+        ? undefined
+        : { query: async () => ({ state: opts.permission }) },
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (String(url).includes('127.0.0.1')) {
+        if (opts.fetchOk) return new Response(JSON.stringify({ unlocked: true, agent_pub_key: 'uhCAkKEY' }), { status: 200 });
+        throw new TypeError('fetch failed');
+      }
+      return new Response(JSON.stringify({ error: 'vault_required' }), { status: opts.apiStatus ?? 403 });
+    }),
+  );
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('detectVault: blocked vs not running (2.5.0)', () => {
+  it('every port refused + permission denied → blocked', async () => {
+    stubBrowser({ permission: 'denied' });
+    const auth = new FlowstaAuth({ clientId: 'c', redirectUri: 'https://app/cb' });
+    await expect(auth.detectVault()).resolves.toEqual({ running: false, blocked: true });
+  });
+
+  it('every port refused, no permission signal → plain not running', async () => {
+    stubBrowser({ permission: null });
+    const auth = new FlowstaAuth({ clientId: 'c', redirectUri: 'https://app/cb' });
+    await expect(auth.detectVault()).resolves.toEqual({ running: false });
+  });
+
+  it('a running Vault is reported running regardless of the permission API', async () => {
+    stubBrowser({ permission: 'denied', fetchOk: true });
+    const auth = new FlowstaAuth({ clientId: 'c', redirectUri: 'https://app/cb' });
+    await expect(auth.detectVault()).resolves.toMatchObject({ running: true, agentPubKey: 'uhCAkKEY' });
+  });
+
+  it('loopbackPermissionState reports what the browser decided', async () => {
+    stubBrowser({ permission: 'granted' });
+    expect(await loopbackPermissionState()).toBe('granted');
+    stubBrowser({ permission: null });
+    expect(await loopbackPermissionState()).toBe('unknown');
+  });
+});
+
+describe('signFile when the browser blocks the Vault (2.5.0)', () => {
+  it('throws VaultBlockedError - not "install the Vault"', async () => {
+    stubBrowser({ permission: 'denied', session: true });
+    const auth = new FlowstaAuth({ clientId: 'c', redirectUri: 'https://app/cb' });
+    await expect(auth.signFile({ fileHash: 'a'.repeat(64) })).rejects.toBeInstanceOf(VaultBlockedError);
+  });
+
+  it('still throws VaultRequiredError when the browser is not the reason', async () => {
+    stubBrowser({ permission: null, session: true });
+    const auth = new FlowstaAuth({ clientId: 'c', redirectUri: 'https://app/cb' });
+    await expect(auth.signFile({ fileHash: 'a'.repeat(64) })).rejects.toBeInstanceOf(VaultRequiredError);
   });
 });
