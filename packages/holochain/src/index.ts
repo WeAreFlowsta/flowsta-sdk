@@ -954,7 +954,9 @@ export async function getFlowstaIdentity(
 export async function revokeFlowstaIdentity(
   options: RevokeFlowstaIdentityOptions,
 ): Promise<{ success: boolean }> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  // Sweep 27777-27779 like every other call: on a shifted port the revoke
+  // silently never reached the Vault and it kept listing the app.
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
   try {
     const controller = new AbortController();
@@ -1006,7 +1008,7 @@ export async function revokeFlowstaIdentity(
 export async function checkFlowstaLinkStatus(
   options: CheckFlowstaLinkStatusOptions,
 ): Promise<{ linked: boolean; appName?: string }> {
-  const ipcUrl = options.ipcUrl || 'http://127.0.0.1:27777';
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
   try {
     const controller = new AbortController();
@@ -1554,7 +1556,9 @@ export async function authenticateWithVault(
   const challengeB64 = btoa(binary);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 75000); // 75s > Vault's 60s approval dialog
+  // The Vault can hold the request ~55 s for an unlock, then run its 60 s
+  // approval dialog - budget past both.
+  const timeout = setTimeout(() => controller.abort(), 125000);
 
   try {
     const response = await fetch(`${ipcUrl}/authenticate`, {

@@ -6,6 +6,7 @@ Additive; pairs with Flowsta Vault 1.3.0 (older Vaults simply omit the new field
 
 - `authenticateWithVault` takes `clientId` + `scopes`. With `scopes: ['email']` the Vault's sign-in dialog shows the user the address that will be shared and states that your app receives it as text it can keep; if they allow, the result carries `email` + `emailVerified: true`, and the Vault files the same grant with Flowsta so `/oauth/userinfo` agrees. Only a verified address is ever offered; scopes your app is not registered for are ignored.
 - `getVaultStatus` returns `email` / `emailVerified` for a linked app holding such a grant.
+- `revokeFlowstaIdentity` and `checkFlowstaLinkStatus` sweep ports 27777-27779 like every other call instead of assuming 27777; `authenticateWithVault` waits up to 125 s, past the Vault's unlock hold plus its 60 s dialog.
 - `listVaultBackups` entries carry `labels` - every label the app has stored - so an app can reconcile its index against the Vault in one call.
 
 ## 3.1.0

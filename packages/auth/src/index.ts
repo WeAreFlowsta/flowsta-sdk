@@ -617,7 +617,7 @@ export class FlowstaAuth {
     intent?: string;
     aiGeneration?: string;
     contentRights?: Record<string, string>;
-  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number; action_hash: string | null }> {
+  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number | string; action_hash: string | null }> {
     const token = this.getAccessToken();
     if (!token) throw new Error('Not authenticated');
 
@@ -675,7 +675,7 @@ export class FlowstaAuth {
     intent?: string;
     aiGeneration?: string;
     contentRights?: Record<string, string>;
-  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number; action_hash: string | null }> {
+  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number | string; action_hash: string | null }> {
     const controller = new AbortController();
     // 60s Vault approval timeout + buffer
     const timeout = setTimeout(() => controller.abort(), 70000);
@@ -791,7 +791,8 @@ export class FlowstaAuth {
       file_hash: string;
       signer: string;
       signer_did?: string;
-      signed_at: number;
+      /** Unix seconds from the API path; an ISO-8601 string from the Vault path. */
+      signed_at: number | string;
       intent?: string;
       ai_generation?: string;
       content_rights?: Record<string, any>;
