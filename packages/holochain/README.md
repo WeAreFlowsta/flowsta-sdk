@@ -224,6 +224,7 @@ Check if Flowsta Vault is running and unlocked. When the vault is unlocked, the 
 - `displayName` _(2.3.0+)_ — scope-gated by `display_name`
 - `profilePicture` _(2.3.0+)_ — scope-gated by `profile_picture`
 - `webUsername` _(2.4.1+)_ — scope-gated by `username`
+- `email` + `emailVerified` _(3.2.0+, Vault 1.3.0+)_ — present only after the user allowed your app's `email` scope **in a Vault dialog** (request it on `authenticateWithVault` with `scopes: ['email']`); only a verified address is ever shared, and the user is told your app receives it as text it can keep
 
 Scopes are configured per `client_id` at [dev.flowsta.com](https://dev.flowsta.com); the user approves them once at link time. Fields are `undefined` until granted.
 

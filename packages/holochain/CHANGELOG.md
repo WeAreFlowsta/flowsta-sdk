@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.2.0
+
+Additive; pairs with Flowsta Vault 1.3.0 (older Vaults simply omit the new fields).
+
+- `authenticateWithVault` takes `clientId` + `scopes`. With `scopes: ['email']` the Vault's sign-in dialog shows the user the address that will be shared and states that your app receives it as text it can keep; if they allow, the result carries `email` + `emailVerified: true`, and the Vault files the same grant with Flowsta so `/oauth/userinfo` agrees. Only a verified address is ever offered; scopes your app is not registered for are ignored.
+- `getVaultStatus` returns `email` / `emailVerified` for a linked app holding such a grant.
+- `listVaultBackups` entries carry `labels` - every label the app has stored - so an app can reconcile its index against the Vault in one call.
+
 ## 3.1.0
 
 - Browser-blocked is no longer mistaken for not-running. Chrome 142+ gates a public page's requests to `127.0.0.1` behind a Local Network Access permission, and a denial used to look exactly like an absent Vault. `getVaultStatus` now returns `blocked: true` in that case, `requireUnlockedVault` (so `signDocument`, `authenticateWithVault`, `linkFlowstaIdentity`, backups) throws the new `VaultBlockedError` (`vault_blocked`) instead of `VaultNotFoundError`, and `loopbackPermissionState()` is exported for apps that want to explain the prompt up front.
