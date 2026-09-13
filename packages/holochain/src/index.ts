@@ -649,6 +649,14 @@ export interface VaultStatus {
    *  (claimed at flowsta.com). Only populated when the requesting app has
    *  the `username` scope configured at dev.flowsta.com. */
   webUsername?: string;
+  /** The user's email address. Present only when the requesting app has the
+   *  `email` scope AND the user allowed it in a Vault dialog (sign-in, relay
+   *  or link approval) - the Vault files that grant with Flowsta too, so
+   *  `/oauth/userinfo` agrees. Only a verified address is ever shared.
+   *  Vault 1.3.0+. _(3.2.0)_ */
+  email?: string;
+  /** `true` alongside `email` - the Vault shares verified addresses only. _(3.2.0)_ */
+  emailVerified?: boolean;
   /** Vault version */
   version?: string;
 }
@@ -722,6 +730,7 @@ export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
       displayName: data.display_name || data.displayName,
       profilePicture: data.profile_picture || data.profilePicture,
       webUsername: data.web_username || data.webUsername,
+      ...(data.email ? { email: data.email as string, emailVerified: data.email_verified === true } : {}),
       version: data.version,
     };
   } catch {
@@ -1480,6 +1489,13 @@ export interface AuthenticateWithVaultResult {
   agentPubKey: string;
   /** The signer's DID (did:flowsta:…). */
   did: string;
+  /** The user's email, when `scopes` included `email` and the user allowed
+   *  it in the Vault dialog. The Vault also files the grant with Flowsta.
+   *  Absent when not requested, not allowed, or the address is unverified.
+   *  Vault 1.3.0+. _(3.2.0)_ */
+  email?: string;
+  /** `true` alongside `email`. _(3.2.0)_ */
+  emailVerified?: boolean;
 }
 
 export interface AuthenticateWithVaultOptions {
@@ -1488,6 +1504,12 @@ export interface AuthenticateWithVaultOptions {
   appName?: string;
   /** Human-readable reason shown in the approval dialog. */
   reason?: string;
+  /** Your app's client_id from dev.flowsta.com. Required for `scopes`. _(3.2.0)_ */
+  clientId?: string;
+  /** Scopes to request in the same dialog. Today `email` is the one that
+   *  matters: the dialog shows the address that will be shared and the user
+   *  decides. Scopes your app is not registered for are ignored. _(3.2.0)_ */
+  scopes?: string[];
 }
 
 /**
@@ -1543,6 +1565,7 @@ export async function authenticateWithVault(
         app_name: options.appName || 'Sign in with Flowsta',
         challenge: challengeB64,
         reason: options.reason || 'Sign in',
+        ...(options.clientId ? { client_id: options.clientId, scopes: options.scopes || [] } : {}),
       }),
     });
     clearTimeout(timeout);
@@ -1567,6 +1590,7 @@ export async function authenticateWithVault(
       signature: data.signature,
       agentPubKey: data.agent_pub_key,
       did: data.did,
+      ...(data.email ? { email: data.email as string, emailVerified: data.email_verified === true } : {}),
     };
   } catch (err) {
     clearTimeout(timeout);
