@@ -527,6 +527,12 @@ export interface FlowstaBackupEntry {
   backupCount: number;
   totalSize: number;
   lastBackupAt: number;
+  /**
+   * Every label this app has stored in the Vault (unlabelled snapshots are
+   * not listed). Lets an app reconcile its own index against what the Vault
+   * holds without retrieving each label. Vault 1.3.0+; older Vaults omit it.
+   */
+  labels?: string[];
 }
 
 export interface FlowstaBackupStats {
@@ -1296,6 +1302,7 @@ export async function listVaultBackups(
         backupCount: a.backup_count,
         totalSize: a.total_size,
         lastBackupAt: a.last_backup_at,
+        ...(Array.isArray(a.labels) ? { labels: a.labels as string[] } : {}),
       })),
     };
   } catch {
