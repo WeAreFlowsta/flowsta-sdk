@@ -11,6 +11,7 @@ Flowsta Vault acts as a local identity provider (like MetaMask for Ethereum) for
 - **Auto-backup + reinstall recovery (v2.4.0+)** — canonical-shape backups with a dispatcher pattern for restore. One small `match` per entry type covers both sides forever.
 - **CAL §4.2.1 data export** — the Vault's "Download Export" produces a portable JSON file with the user's cryptographic keys and your app's records in plain English. The export every CAL-licensed Holochain app must provide; you write nothing.
 - **Document signing** — `signDocument()` over Vault IPC.
+- **Sign in, and the user's email only when they allow it (v3.2.0, Vault 1.3.0+)** — `authenticateWithVault()` signs a Flowsta login challenge in the Vault; ask for the `email` scope and the Vault's own dialog shows the address it would share, the user decides, and only a verified address is ever handed over.
 
 **No shared DNA or API dependency required for identity linking.** Anyone on your DHT can verify the user's Flowsta identity purely via Ed25519 cryptography.
 
@@ -172,7 +173,7 @@ Walk a Vault backup and call a dispatcher once per record — used to restore da
 ```typescript
 import { restoreFromVault, listVaultBackups } from '@flowsta/holochain';
 
-const backups = await listVaultBackups();
+const backups = await listVaultBackups(); // 3.2.0: each app entry carries `labels` - every label it has stored
 const ours = backups.apps.find(a => a.clientId === clientId);
 if (ours && ours.backupCount > 0 && /* local source chain is empty */) {
   const result = await restoreFromVault({
@@ -217,6 +218,39 @@ const { records, summary } = await dumpCellStateForBackup({
 });
 ```
 
+### `authenticateWithVault(challenge, options?)`
+
+Sign a Flowsta auth challenge through the local Vault ("Sign in with your Vault"). Browser-safe: plain `fetch`, no dependencies. The user approves in a Vault dialog; a locked Vault brings its unlock screen forward and holds the request through the unlock (the call waits up to 125 s).
+
+```typescript
+import { authenticateWithVault } from '@flowsta/holochain';
+
+// 1. A challenge from the Flowsta API
+const { challenge } = await fetch('https://auth-api.flowsta.com/auth/vault/challenge', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ client_id: YOUR_CLIENT_ID }),
+}).then((r) => r.json());
+
+// 2. The Vault signs it - pass the challenge EXACTLY as issued
+const result = await authenticateWithVault(challenge, {
+  appName: 'ChessChain',
+  reason: 'Sign in to ChessChain',
+  clientId: YOUR_CLIENT_ID,   // 3.2.0: needed for scopes
+  scopes: ['email'],          // 3.2.0: ask for the email in the same dialog
+});
+// { signature, agentPubKey, did, email?, emailVerified? }
+
+// 3. Exchange for a session
+await fetch('https://auth-api.flowsta.com/auth/vault/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ challenge, signature: result.signature, agent_pub_key: result.agentPubKey }),
+});
+```
+
+Options: `{ ipcUrl?, appName?, reason?, clientId?, scopes? }`. With `clientId` + `scopes: ['email']` _(3.2.0, Vault 1.3.0+)_ the dialog shows the user the address that will be shared and says your app receives it as text it can keep; if they allow, `email` and `emailVerified: true` come back and the Vault files the same grant with Flowsta, so `/oauth/userinfo` agrees. Scopes your app is not registered for are ignored, an unverified email is never offered, a remembered site still sees the dialog the first time it asks for email, and the user can stop sharing at any time in the Vault's Connections page. Throws `VaultBlockedError` _(3.1.0)_, `VaultNotFoundError`, `VaultLockedError` (only if the user does not unlock in time), `UserDeniedError`, `IdentityMismatchError` _(3.0.0)_, or `FlowstaHolochainError` with code `'timeout'`. On Safari, Brave and phones use `startRelayLogin` instead (see the browser table below).
+
 ### `getVaultStatus(ipcUrl?)`
 
 Check if Flowsta Vault is running and unlocked. When the vault is unlocked, the returned `VaultStatus` carries the currently-active account's profile fields so you can render a `Signed in as ${displayName}` chip without hitting `/status` directly:
@@ -242,7 +276,7 @@ if (status.blocked) {
 }
 ```
 
-### Which browsers reach the Vault _(verified 2026-08)_
+### Which browsers reach the Vault _(verified 2026-08, re-checked 2026-09)_
 
 Every loopback call here targets `http://127.0.0.1` from your page. Who lets that through:
 
@@ -250,8 +284,8 @@ Every loopback call here targets `http://127.0.0.1` from your page. Who lets tha
 |---|---|---|
 | Chrome / Edge / other Chromium | **Yes, behind a permission** - Chrome 142+ asks "Look for and connect to any device on your local network" on the first request (Chrome 145+: "Apps on device"). | Nothing special to send; a denial surfaces as `status.blocked` / `VaultBlockedError` - show the settings path, not "install the Vault" |
 | Firefox | **Yes** (loopback exempt from mixed-content blocking since Firefox 55; its own Local Network Access check currently auto-allows) | Direct path |
-| Safari | **No** (WebKit treats loopback as mixed content) | `startRelayLogin` + `openVaultDeepLink` |
-| Brave | **No** unless the site is on Brave's allowlist (silent block; `navigator.brave.isBrave()` detects it) | Relay, or tell the user about `brave://settings/content/localhostAccess` |
+| Safari | **No** (WebKit treats loopback as mixed content; WebKit merged a Local Network Access permission check in September 2026, but until Safari ships the prompt it still refuses) | `startRelayLogin` + `openVaultDeepLink` |
+| Brave | **No** unless the site is on Brave's `localhost-permission-allow-list` (silent block; `navigator.brave.isBrave()` detects it) | Relay, or tell the user about `brave://settings/content/localhostAccess` |
 | Phones | No Vault on the device | `startRelayLogin` (typed code) |
 | Desktop apps (Tauri/Electron) | Yes | Direct path |
 

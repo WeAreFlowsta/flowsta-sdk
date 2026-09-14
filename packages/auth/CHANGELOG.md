@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.1
+
+- `signFile` / `signBatch`: `signed_at` is typed for both paths (a number from the Vault, an ISO string from the API fallback) instead of assuming one shape.
+
 ## 2.5.0
 
 - `detectVault()` reports `blocked: true` when the BROWSER refused the loopback request (Chrome 142+ Local Network Access permission denied, Brave's localhost block) - previously indistinguishable from "not running", which sent people to install a Vault they had. `signFile` / `signBatch` throw the new `VaultBlockedError` (`vault_blocked`) in that case instead of `VaultRequiredError`. `loopbackPermissionState()` exported.
