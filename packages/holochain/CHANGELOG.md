@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.3.0
+
+Additive.
+
+- `partitionKeyFor(agentPubKey)` - the folder-safe key the Flowsta apps use to keep one identity's data apart from another's (first 16 hex chars of SHA-256 over the agent key's 39 raw bytes; the same for the base64url and base58 spellings, and the same key the Vault, ProofPoll and Your Own AI use for their own per-identity folders). `PARTITION_KEY_LENGTH` exported. Use it to name per-identity storage instead of writing the agent key into a name.
+- `getBoundIdentity()` is documented as what it always was: one slot per origin, the identity the app operates under now, overwritten by the next `linkFlowstaIdentity`. Apps holding data for several identities key that data by `partitionKeyFor` and treat the binding as the pointer to the active one.
+- The `expected_identity` comment in `backupToVault` no longer calls the Vault's gate forward-compatible: the Vault (1.3.0+) refuses a write under a different active identity server-side.
+
 ## 3.2.0
 
 Additive; pairs with Flowsta Vault 1.3.0 (older Vaults simply omit the new fields).

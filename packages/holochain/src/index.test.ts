@@ -13,6 +13,8 @@ import {
   getBoundIdentity,
   IdentityMismatchError,
   onIdentityChanged,
+  partitionKeyFor,
+  PARTITION_KEY_LENGTH,
   retrieveFromVault,
   VaultLockedError,
   VaultNotFoundError,
@@ -340,5 +342,33 @@ describe('authenticateWithVault under a browser block', () => {
     vi.stubGlobal('navigator', {});
     mockFetch(() => null);
     await expect(authenticateWithVault('c', { ipcUrl: IPC })).rejects.toBeInstanceOf(VaultNotFoundError);
+  });
+});
+
+// ── partitionKeyFor ────────────────────────────────────────────────
+
+describe('partitionKeyFor', () => {
+  // Vectors shared with the Vault's, ProofPoll's and Your Own AI's Rust
+  // tests: sha256 over the 39 decoded bytes, first 16 hex chars.
+  const A64 = 'uhCAk75qJ5oobyfm3Lh-akZIQSe2zpSTtG1Pcxs23qTFoQwY_GDWY';
+  const A58 = 'u2VGYeS8PwMUycfXur26JPUyLQvmcGpc7abupp5SHFNnrw4o5ySvKUT';
+  const B64 = 'uhCAk0O4EJ97RZ7eX2wf9x08PWjNj3Avt2K1SdU8tgPzWoQBwWk0s';
+
+  it('hashes the decoded key, not its spelling', async () => {
+    expect(await partitionKeyFor(A64)).toBe('dd5ccd5218d2630e');
+    expect(await partitionKeyFor(A58)).toBe('dd5ccd5218d2630e');
+    expect(await partitionKeyFor(` ${A64} `)).toBe('dd5ccd5218d2630e');
+  });
+
+  it('differs per identity and has a fixed length', async () => {
+    const b = await partitionKeyFor(B64);
+    expect(b).toBe('220c0d3ed5953208');
+    expect(b).toHaveLength(PARTITION_KEY_LENGTH);
+  });
+
+  it('returns null for anything that is not an agent key', async () => {
+    expect(await partitionKeyFor('')).toBeNull();
+    expect(await partitionKeyFor('hCAk75qJ5oobyfm3Lh-akZIQSe2zpSTtG1Pcxs23qTFoQwY_GDWY')).toBeNull();
+    expect(await partitionKeyFor('uAAAA')).toBeNull();
   });
 });

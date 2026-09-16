@@ -271,7 +271,15 @@ export function bindVaultIdentity(agentPubKey: string): void {
   storageAvailable()?.setItem(BOUND_IDENTITY_STORAGE_KEY, agentPubKey);
 }
 
-/** The bound Vault identity, or null when nothing is bound. */
+/**
+ * The bound Vault identity, or null when nothing is bound.
+ *
+ * One slot per origin: this is the identity the app is operating under
+ * right now, not a history. `linkFlowstaIdentity` under a second Flowsta
+ * identity overwrites it. An app that keeps data for more than one identity
+ * stores that data under `partitionKeyFor(agentPubKey)` and treats this
+ * value as the pointer to the active partition.
+ */
 export function getBoundIdentity(): string | null {
   const stored = storageAvailable()?.getItem(BOUND_IDENTITY_STORAGE_KEY);
   return stored ?? _boundIdentityMemory;
@@ -338,6 +346,32 @@ export function agentKeysMatch(a: string, b: string): boolean | null {
   const bb = agentKeyBytes(b);
   if (!ba || !bb) return null;
   return ba.every((v, i) => v === bb[i]);
+}
+
+/** Length of the identity partition key (hex chars). */
+export const PARTITION_KEY_LENGTH = 16;
+
+/**
+ * The folder-safe key the Flowsta apps use to keep one identity's data apart
+ * from another's: the first 16 hex characters of SHA-256 over the agent
+ * key's 39 raw bytes. Identical for the base64url and base58 spellings of
+ * the same key, and identical to the key the Flowsta Vault, ProofPoll and
+ * Your Own AI use for their own per-identity folders - so an app can name
+ * its storage (an IndexedDB database, a folder, a key prefix) after the
+ * identity without ever writing the agent key itself into a name.
+ *
+ * Returns null when the string is not an agent key. Needs Web Crypto
+ * (`crypto.subtle`): every browser, Node 19+.
+ */
+export async function partitionKeyFor(agentPubKey: string): Promise<string | null> {
+  const bytes = agentKeyBytes(agentPubKey.trim());
+  if (!bytes) return null;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new FlowstaHolochainError('Web Crypto is not available in this context', 'no_crypto');
+  const digest = new Uint8Array(await subtle.digest('SHA-256', Uint8Array.from(bytes)));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, PARTITION_KEY_LENGTH);
 }
 
 /** Refuse when the Vault's current identity definitely differs from the binding. */
@@ -1093,8 +1127,9 @@ export async function backupToVault(
     label: options.label,
     data,
     content_type: options.contentType,
-    // Forward-compatible hard gate: current Vaults ignore this field;
-    // once the bridge accepts expected_identity it refuses server-side.
+    // Server-side gate: the Vault (1.3.0+) refuses the write when its
+    // active identity differs from this one; older Vaults ignore the field
+    // and the client-side assertion above stands alone.
     expected_identity: bound || undefined,
   });
   const dataSize = new TextEncoder().encode(body).length;

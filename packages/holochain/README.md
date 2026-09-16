@@ -291,6 +291,18 @@ Every loopback call here targets `http://127.0.0.1` from your page. Who lets tha
 
 `loopbackPermissionState()` _(3.1.0)_ returns `'granted' | 'denied' | 'prompt' | 'unknown'` if you want to explain the prompt before it appears.
 
+### `partitionKeyFor(agentPubKey)` _(3.3.0)_
+
+The key the Flowsta apps use to keep one identity's data apart from another's: the first 16 hex characters of SHA-256 over the agent key's 39 raw bytes. It is the same for the base64url and base58 spellings of a key, and the same key the Flowsta Vault, ProofPoll and Your Own AI use for their own per-identity folders. Resolves to `null` when the string is not an agent key.
+
+Use it when your app keeps data for more than one Flowsta identity on the same device or origin - an IndexedDB database, a folder, a key prefix - so the storage is named after the identity without the agent key itself appearing in a name. `getBoundIdentity()` is one slot per origin (the identity the app operates under now, overwritten by the next `linkFlowstaIdentity`), so treat it as the pointer to the active partition, not as a history.
+
+```typescript
+const { agentPubKey } = await linkFlowstaIdentity({ clientId, appName });
+const partition = await partitionKeyFor(agentPubKey); // e.g. 'dd5ccd5218d2630e'
+const db = await openDB(`myapp-${partition}`);
+```
+
 ### `getFlowstaLinkStatus(options)` _(2.3.0)_
 
 Returns the canonical three-state link status. This is the recommended
