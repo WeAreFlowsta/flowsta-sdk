@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.4.0
+
+Additive. Groundwork for Vault 1.5.0 (the identity switcher); works with every 1.x Vault.
+
+- `resolveVaultUrl` probes 27777-27779 in parallel on every call and picks the best answer: unlocked under the identity this app is bound to, then unlocked, then initialized, then any - the first port that answered used to win, so a locked (or another OS user's) Vault on 27777 hid the right one on 27778.
+- `signDocument` and `authenticateWithVault` send `expected_identity` like the backup calls have since 3.0.0; a Vault under a different identity refuses them instead of signing as the wrong person.
+- `onIdentityChanged` starts from the bound identity, so an app that opens against a Vault already switched hears about it on the first tick.
+- `getVaultIdentity()` - the unlocked agent key or null, one status read.
+- `reconnectIdentity({ clientId, localAgentPubKey })` - after a switch: rebinds silently when the new identity already holds a link for this app, or answers `approval_needed` so the app runs `linkFlowstaIdentity`; `locked` / `offline` leave the binding alone.
+
 ## 3.3.0
 
 Additive.

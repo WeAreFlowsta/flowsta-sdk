@@ -430,38 +430,87 @@ export async function loopbackPermissionState(): Promise<'granted' | 'denied' | 
   return 'unknown';
 }
 
-async function probeStatus(url: string, timeoutMs = 1500): Promise<boolean> {
+/** What one port answered to `/status`, or null when nothing did. */
+interface PortProbe {
+  url: string;
+  unlocked: boolean;
+  initialized: boolean;
+  agentPubKey: string | null;
+}
+
+async function probeStatusDetail(url: string, timeoutMs = 1500): Promise<PortProbe | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const r = await fetch(`${url}/status`, { signal: controller.signal, ...LOOPBACK_FETCH_INIT });
     clearTimeout(timeout);
-    return r.ok;
+    if (!r.ok) return null;
+    const data = await r.json().catch(() => ({}));
+    return {
+      url,
+      unlocked: !!data.unlocked,
+      initialized: data.initialized !== false,
+      agentPubKey: (data.agent_pub_key || data.agentPubKey || null) as string | null,
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
 /**
+ * Rank the Vaults that answered (3.4.0). The Vault binds 27777 or the next
+ * port up, and on a shared computer another OS user's Vault, or a staging
+ * build, can hold a lower port - so the FIRST answer is not the right one.
+ * Order: unlocked under the identity this app is bound to > unlocked >
+ * initialized (locked) > any answer; ties go to the lower port.
+ */
+function rankProbes(probes: PortProbe[], bound: string | null): PortProbe | null {
+  const score = (p: PortProbe): number => {
+    if (p.unlocked && p.agentPubKey && bound && agentKeysMatch(bound, p.agentPubKey) === true) return 4;
+    if (p.unlocked) return 3;
+    if (p.initialized) return 2;
+    return 1;
+  };
+  let best: PortProbe | null = null;
+  let bestScore = 0;
+  for (const p of probes) {
+    const sc = score(p);
+    if (sc > bestScore) {
+      best = p;
+      bestScore = sc;
+    }
+  }
+  return best;
+}
+
+/**
  * Resolve the Vault IPC base URL. An explicit `ipcUrl` is returned as-is;
- * otherwise ports 27777-27779 are probed (cached until a call fails).
- * When nothing answers, the default port is returned - callers surface
- * their own not-found semantics.
+ * otherwise ports 27777-27779 are probed IN PARALLEL on every call and the
+ * best answer wins (see `rankProbes`) - a locked copy on 27777 no longer
+ * hides the unlocked one on 27778 _(3.4.0; before, the first port that
+ * answered was cached until a call failed)_. When nothing answers, the
+ * last known URL or the default port is returned - callers surface their
+ * own not-found semantics.
  */
 export async function resolveVaultUrl(ipcUrl?: string): Promise<string> {
   if (ipcUrl) return ipcUrl;
-  if (_resolvedVaultUrl && (await probeStatus(_resolvedVaultUrl))) {
-    return _resolvedVaultUrl;
+  const probes = await Promise.all(VAULT_PORTS.map((port) => probeStatusDetail(`http://127.0.0.1:${port}`)));
+  const best = rankProbes(probes.filter((p): p is PortProbe => p !== null), getBoundIdentity());
+  if (best) {
+    _resolvedVaultUrl = best.url;
+    return best.url;
   }
-  _resolvedVaultUrl = null;
-  for (const port of VAULT_PORTS) {
-    const url = `http://127.0.0.1:${port}`;
-    if (await probeStatus(url)) {
-      _resolvedVaultUrl = url;
-      return url;
-    }
-  }
-  return `http://127.0.0.1:${VAULT_PORTS[0]}`;
+  return _resolvedVaultUrl ?? `http://127.0.0.1:${VAULT_PORTS[0]}`;
+}
+
+/**
+ * The agent key of the Vault that is unlocked right now, or null when the
+ * Vault is locked, absent, or blocked by the browser. Cheap: one status
+ * read after the port sweep. _(3.4.0)_
+ */
+export async function getVaultIdentity(ipcUrl?: string): Promise<string | null> {
+  const status = await getVaultStatus(ipcUrl);
+  return status.unlocked && status.agentPubKey ? status.agentPubKey : null;
 }
 
 /**
@@ -493,7 +542,10 @@ export function onIdentityChanged(
   callback: (next: string, previous: string | null) => void,
   options: { ipcUrl?: string; intervalMs?: number } = {},
 ): () => void {
-  let previous: string | null = null;
+  // Seeded from the binding (3.4.0): an app that starts against a Vault
+  // already switched to another identity hears about it on the first tick
+  // instead of only after a second switch.
+  let previous: string | null = getBoundIdentity();
   let stopped = false;
   const tick = async () => {
     if (stopped) return;
@@ -516,6 +568,43 @@ export function onIdentityChanged(
     stopped = true;
     clearInterval(timer);
   };
+}
+
+/** Result of `reconnectIdentity` _(3.4.0)_. */
+export type ReconnectIdentityResult =
+  | { state: 'reconnected'; agentPubKey: string; appName?: string }
+  | { state: 'approval_needed'; agentPubKey: string }
+  | { state: 'locked' }
+  | { state: 'offline' };
+
+/**
+ * After the Vault switched identities: rebind silently when the identity
+ * now in the Vault already holds a link for this app (the person consented
+ * before), otherwise tell the app to run the full approval ceremony
+ * (`linkFlowstaIdentity`) because this app is a stranger to that identity.
+ * Pass the local agent key of the profile the app has swapped to.
+ * Correctness never depends on this helper: every call still asserts the
+ * bound identity per request. _(3.4.0)_
+ */
+export async function reconnectIdentity(options: {
+  clientId: string;
+  localAgentPubKey: string;
+  ipcUrl?: string;
+}): Promise<ReconnectIdentityResult> {
+  const status = await getVaultStatus(options.ipcUrl);
+  if (!status.running) return { state: 'offline' };
+  if (!status.unlocked || !status.agentPubKey) return { state: 'locked' };
+  const link = await getFlowstaLinkStatus({
+    clientId: options.clientId,
+    localAgentPubKey: options.localAgentPubKey,
+    ipcUrl: options.ipcUrl,
+  });
+  if (link.state === 'offline') return { state: 'offline' };
+  if (link.state === 'linked') {
+    bindVaultIdentity(status.agentPubKey);
+    return { state: 'reconnected', agentPubKey: status.agentPubKey, appName: link.appName };
+  }
+  return { state: 'approval_needed', agentPubKey: status.agentPubKey };
 }
 
 // ── Backup Types ──────────────────────────────────────────────────
@@ -1462,6 +1551,9 @@ export async function signDocument(
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
+        // The Vault refuses this call under a different identity than the
+        // one this app is bound to (3.4.0; backups sent it since 3.0.0).
+        expected_identity: getBoundIdentity() || undefined,
         file_hash: options.fileHash,
         label: options.label,
         intent: options.intent,
@@ -1601,6 +1693,7 @@ export async function authenticateWithVault(
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
+        expected_identity: getBoundIdentity() || undefined,
         app_name: options.appName || 'Sign in with Flowsta',
         challenge: challengeB64,
         reason: options.reason || 'Sign in',

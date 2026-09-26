@@ -13,6 +13,9 @@ import {
   getBoundIdentity,
   IdentityMismatchError,
   onIdentityChanged,
+  reconnectIdentity,
+  resolveVaultUrl,
+  getVaultIdentity,
   partitionKeyFor,
   PARTITION_KEY_LENGTH,
   retrieveFromVault,
@@ -370,5 +373,117 @@ describe('partitionKeyFor', () => {
     expect(await partitionKeyFor('')).toBeNull();
     expect(await partitionKeyFor('hCAk75qJ5oobyfm3Lh-akZIQSe2zpSTtG1Pcxs23qTFoQwY_GDWY')).toBeNull();
     expect(await partitionKeyFor('uAAAA')).toBeNull();
+  });
+});
+
+
+// ── 3.4.0: the port sweep prefers the right Vault ──────────────────
+
+const statusFor = (port: number, body: unknown) => (url: string) =>
+  url.startsWith(`http://127.0.0.1:${port}/status`) ? json(200, body) : null;
+const anyOf = (...routes: Route[]): Route => (url, init) => {
+  for (const r of routes) {
+    const res = r(url, init);
+    if (res) return res;
+  }
+  return null;
+};
+
+describe('resolveVaultUrl (3.4.0)', () => {
+  it('prefers an unlocked Vault on a higher port over a locked one on 27777', async () => {
+    mockFetch(anyOf(
+      statusFor(27777, { unlocked: false, initialized: true }),
+      statusFor(27778, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) }),
+    ));
+    expect(await resolveVaultUrl()).toBe('http://127.0.0.1:27778');
+  });
+
+  it('prefers the unlocked Vault holding the bound identity over another unlocked one', async () => {
+    bindVaultIdentity(b64url(KEY_B));
+    mockFetch(anyOf(
+      statusFor(27777, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) }),
+      statusFor(27779, { unlocked: true, initialized: true, agent_pub_key: b58(KEY_B) }),
+    ));
+    expect(await resolveVaultUrl()).toBe('http://127.0.0.1:27779');
+  });
+
+  it('prefers an initialized (locked) Vault over a fresh empty one', async () => {
+    mockFetch(anyOf(
+      statusFor(27777, { unlocked: false, initialized: false }),
+      statusFor(27778, { unlocked: false, initialized: true }),
+    ));
+    expect(await resolveVaultUrl()).toBe('http://127.0.0.1:27778');
+  });
+
+  it('falls back to the default port when nothing answers, and honours an explicit URL', async () => {
+    mockFetch(() => null);
+    expect(await resolveVaultUrl('http://127.0.0.1:9999')).toBe('http://127.0.0.1:9999');
+    expect(await resolveVaultUrl()).toMatch(/^http:\/\/127\.0\.0\.1:2777[789]$/);
+  });
+});
+
+describe('getVaultIdentity (3.4.0)', () => {
+  it('returns the unlocked agent key, or null when locked', async () => {
+    mockFetch(statusFor(27777, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) }));
+    expect(await getVaultIdentity()).toBe(b64url(KEY_A));
+    mockFetch(statusFor(27777, { unlocked: false, initialized: true }));
+    expect(await getVaultIdentity()).toBe(null);
+  });
+});
+
+describe('onIdentityChanged seeded from the binding (3.4.0)', () => {
+  it('fires on the first tick when the Vault already holds a different identity than the app is bound to', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    mockFetch(statusFor(27777, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_B) }));
+    const seen: Array<[string, string | null]> = [];
+    const stop = onIdentityChanged((next, prev) => seen.push([next, prev]), { intervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 30));
+    stop();
+    expect(seen).toEqual([[b64url(KEY_B), b64url(KEY_A)]]);
+  });
+});
+
+describe('reconnectIdentity (3.4.0)', () => {
+  const vaultUnlockedAs = (key: Uint8Array) => statusFor(27777, { unlocked: true, initialized: true, agent_pub_key: b64url(key) });
+  const linkStatus = (linked: boolean) => (url: string) =>
+    url.includes('/link-status') ? json(200, linked ? { linked: true, app_name: 'ChessChain' } : { linked: false }) : null;
+
+  it('rebinds silently when the new identity already holds a link for this app', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    mockFetch(anyOf(vaultUnlockedAs(KEY_B), linkStatus(true)));
+    const r = await reconnectIdentity({ clientId: 'flowsta_app_x', localAgentPubKey: b64url(KEY_A) });
+    expect(r).toEqual({ state: 'reconnected', agentPubKey: b64url(KEY_B), appName: 'ChessChain' });
+    expect(getBoundIdentity()).toBe(b64url(KEY_B));
+  });
+
+  it('asks for the approval ceremony when the new identity is a stranger to this app', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    mockFetch(anyOf(vaultUnlockedAs(KEY_B), linkStatus(false)));
+    const r = await reconnectIdentity({ clientId: 'flowsta_app_x', localAgentPubKey: b64url(KEY_A) });
+    expect(r).toEqual({ state: 'approval_needed', agentPubKey: b64url(KEY_B) });
+    expect(getBoundIdentity()).toBe(b64url(KEY_A));
+  });
+
+  it('reports locked and offline without touching the binding', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    mockFetch(statusFor(27777, { unlocked: false, initialized: true }));
+    expect(await reconnectIdentity({ clientId: 'x', localAgentPubKey: b64url(KEY_A) })).toEqual({ state: 'locked' });
+    mockFetch(() => null);
+    expect(await reconnectIdentity({ clientId: 'x', localAgentPubKey: b64url(KEY_A) })).toEqual({ state: 'offline' });
+    expect(getBoundIdentity()).toBe(b64url(KEY_A));
+  });
+});
+
+describe('expected_identity on sign and authenticate (3.4.0)', () => {
+  it('signDocument and authenticateWithVault send the bound identity', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    const bodies: any[] = [];
+    mockFetch((url, init) => {
+      if (url.endsWith('/status')) return json(200, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) });
+      if (url.endsWith('/authenticate')) { bodies.push(JSON.parse(String(init?.body))); return json(200, { signature: 'c2ln', agent_pub_key: b64url(KEY_A) }); }
+      return null;
+    });
+    await authenticateWithVault({ challenge: 'aGVsbG8=', appName: 'T' }).catch(() => {});
+    expect(bodies[0]?.expected_identity).toBe(b64url(KEY_A));
   });
 });

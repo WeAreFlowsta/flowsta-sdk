@@ -291,6 +291,17 @@ Every loopback call here targets `http://127.0.0.1` from your page. Who lets tha
 
 `loopbackPermissionState()` _(3.1.0)_ returns `'granted' | 'denied' | 'prompt' | 'unknown'` if you want to explain the prompt before it appears.
 
+### `reconnectIdentity({ clientId, localAgentPubKey })` _(3.4.0)_
+
+Call it when `onIdentityChanged` fires (or at startup when `getVaultIdentity()` differs from `getBoundIdentity()`), after your app has swapped to that identity's own data (`partitionKeyFor`). If the identity now in the Vault already holds a link for your app, the binding moves silently (`reconnected`); if not, you get `approval_needed` and run `linkFlowstaIdentity` as for a stranger. `locked` and `offline` change nothing. Every call still asserts the bound identity per request - this helper is the UX, not the safety.
+
+```typescript
+const r = await reconnectIdentity({ clientId: CLIENT_ID, localAgentPubKey: myProfileAgentKey });
+if (r.state === 'approval_needed') await linkFlowstaIdentity({ appName, clientId: CLIENT_ID, localAgentPubKey: myProfileAgentKey });
+```
+
+Also in 3.4.0: `resolveVaultUrl` sweeps the three ports in parallel and prefers the unlocked Vault holding your bound identity; `signDocument` and `authenticateWithVault` send `expected_identity`; `onIdentityChanged` starts from the binding; `getVaultIdentity()`.
+
 ### `partitionKeyFor(agentPubKey)` _(3.3.0)_
 
 The key the Flowsta apps use to keep one identity's data apart from another's: the first 16 hex characters of SHA-256 over the agent key's 39 raw bytes. It is the same for the base64url and base58 spellings of a key, and the same key the Flowsta Vault, ProofPoll and Your Own AI use for their own per-identity folders. Resolves to `null` when the string is not an agent key.
