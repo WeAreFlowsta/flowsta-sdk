@@ -26,7 +26,7 @@ v3 makes wrong-identity and error states impossible to mistake for "no data". Tw
 
 New in v3, no code needed:
 
-- **Identity binding** — `linkFlowstaIdentity` records the Vault identity it linked with (persisted in `localStorage` where available), and the write-shaped calls - `backupToVault`, `signDocument`, `authenticateWithVault` - refuse on a definite mismatch. `retrieveFromVault` relies on the Vault's own 409 answer instead (older Vaults without that response can't flag wrong-identity reads). `bindVaultIdentity()` / `getBoundIdentity()` / `clearBoundIdentity()` are exported for apps that manage links themselves, `onIdentityChanged(cb)` polls for Vault account switches (UX only - the asserting calls check independently), and `agentKeysMatch(a, b)` compares agent keys across their base64url and base58 encodings.
+- **Identity binding** — `linkFlowstaIdentity` records the Vault identity it linked with (persisted in `localStorage` where available), and the write-shaped calls - `backupToVault`, `signDocument`, `authenticateWithVault` - refuse on a definite mismatch. `retrieveFromVault` relies on the Vault's own 409 answer instead (older Vaults without that response can't flag wrong-identity reads). `bindVaultIdentity()` / `getBoundIdentity()` / `clearBoundIdentity()` are exported for apps that manage links themselves, `onIdentityChanged(cb)` polls for Vault identity switches (UX only - the asserting calls check independently), and `agentKeysMatch(a, b)` compares agent keys across their base64url and base58 encodings.
 - **Port sweep** — when no `ipcUrl` is given, calls resolve the Vault across ports 27777-27779 instead of assuming 27777 (a second Vault instance shifts ports; "absent" used to fail open).
 
 ## Installation
@@ -306,6 +306,8 @@ if (r.state === 'approval_needed') await linkFlowstaIdentity({ appName, clientId
 ```
 
 Also in 3.4.0: `resolveVaultUrl` sweeps the three ports in parallel and prefers the unlocked Vault holding your bound identity; `signDocument` and `authenticateWithVault` send `expected_identity`; `onIdentityChanged` starts from the binding; `getVaultIdentity()`.
+
+Also in 3.5.0 (pairs with Vault 1.5.0, harmless before): `resolveVaultUrl` ranks a locked Vault that holds your bound identity above an unlocked Vault holding someone else - loopback ports are shared by every user account on a computer, so the unlocked one may not be this person's; `getFlowstaLinkStatus` and `listVaultBackups` send `expected_identity` in the query string when bound, and a 1.5.0 Vault under a different identity refuses them; `getVaultStatus` carries `activeIdentity`, `identityEpoch` and `instanceId`.
 
 ### `partitionKeyFor(agentPubKey)` _(3.3.0)_
 
