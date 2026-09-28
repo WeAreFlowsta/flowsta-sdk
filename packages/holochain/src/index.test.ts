@@ -4,6 +4,9 @@ import {
   authenticateWithVault,
   backupToVault,
   getVaultStatus,
+  onIdentityChanged,
+  getFlowstaLinkStatus,
+  listVaultBackups,
   loopbackPermissionState,
   VaultBlockedError,
   bindVaultIdentity,
@@ -485,5 +488,91 @@ describe('expected_identity on sign and authenticate (3.4.0)', () => {
     });
     await authenticateWithVault({ challenge: 'aGVsbG8=', appName: 'T' }).catch(() => {});
     expect(bodies[0]?.expected_identity).toBe(b64url(KEY_A));
+  });
+});
+
+describe('resolveVaultUrl (3.5.0): a locked Vault holding the bound identity', () => {
+  it('outranks an unlocked Vault that holds someone else', async () => {
+    bindVaultIdentity(b64url(KEY_B));
+    mockFetch(anyOf(
+      statusFor(27777, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A), active_identity: b64url(KEY_A) }),
+      statusFor(27778, { unlocked: false, initialized: true, agent_pub_key: null, active_identity: b58(KEY_B) }),
+    ));
+    expect(await resolveVaultUrl()).toBe('http://127.0.0.1:27778');
+  });
+
+  it('still prefers the unlocked one when both hold the bound identity', async () => {
+    bindVaultIdentity(b64url(KEY_B));
+    mockFetch(anyOf(
+      statusFor(27777, { unlocked: false, initialized: true, active_identity: b64url(KEY_B) }),
+      statusFor(27779, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_B), active_identity: b64url(KEY_B) }),
+    ));
+    expect(await resolveVaultUrl()).toBe('http://127.0.0.1:27779');
+  });
+});
+
+describe('getVaultStatus (3.5.0) surfaces the identity fields', () => {
+  it('maps active_identity, identity_epoch and instance_id when present', async () => {
+    mockFetch(anyOf(statusFor(27777, {
+      unlocked: false, initialized: true, active_identity: b64url(KEY_A), identity_epoch: 3, instance_id: 'abc123',
+    })));
+    const st = await getVaultStatus(IPC);
+    expect(st.activeIdentity).toBe(b64url(KEY_A));
+    expect(st.identityEpoch).toBe(3);
+    expect(st.instanceId).toBe('abc123');
+  });
+
+  it('leaves them out on an older Vault', async () => {
+    mockFetch(anyOf(statusFor(27777, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) })));
+    const st = await getVaultStatus(IPC);
+    expect(st.activeIdentity).toBeUndefined();
+    expect(st.identityEpoch).toBeUndefined();
+  });
+});
+
+describe('expected_identity on GET calls (3.5.0)', () => {
+  it('link-status and backup/list carry the binding in the query string', async () => {
+    bindVaultIdentity(b64url(KEY_B));
+    const seen: string[] = [];
+    mockFetch((url) => {
+      seen.push(url);
+      if (url.includes('/status')) return json(200, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_B) });
+      if (url.includes('/link-status')) return json(200, { linked: false });
+      if (url.includes('/backup/list')) return json(200, { backups: [] });
+      return null;
+    });
+    await getFlowstaLinkStatus({ clientId: 'app', localAgentPubKey: b64url(KEY_A), ipcUrl: IPC }).catch(() => {});
+    await listVaultBackups(IPC).catch(() => {});
+    const ls = seen.find((u) => u.includes('/link-status'));
+    const bl = seen.find((u) => u.includes('/backup/list'));
+    expect(ls).toContain(`expected_identity=${encodeURIComponent(b64url(KEY_B))}`);
+    expect(bl).toContain(`expected_identity=${encodeURIComponent(b64url(KEY_B))}`);
+  });
+});
+
+describe('onIdentityChanged via identity_epoch (3.5.0)', () => {
+  it('fires on an epoch move even when the key comes back the same, and reads a locked Vault', async () => {
+    vi.useFakeTimers();
+    try {
+      let body: Record<string, unknown> = { unlocked: false, initialized: true, active_identity: b64url(KEY_A), identity_epoch: 4 };
+      mockFetch((url) => (url.includes('/status') ? json(200, body) : null));
+      const seen: Array<[string, string | null]> = [];
+      const stop = onIdentityChanged((n, p) => seen.push([n, p]), { ipcUrl: IPC, intervalMs: 1000 });
+      await vi.advanceTimersByTimeAsync(10); // first tick seeds
+      expect(seen).toEqual([]);
+      body = { unlocked: false, initialized: true, active_identity: b64url(KEY_B), identity_epoch: 5 };
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(seen).toEqual([[b64url(KEY_B), b64url(KEY_A)]]);
+      // A→B→A between two polls: same key as before, epoch +2 → still a change
+      body = { unlocked: false, initialized: true, active_identity: b64url(KEY_B), identity_epoch: 7 };
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(seen.length).toBe(2);
+      // a steady epoch is quiet
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(seen.length).toBe(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

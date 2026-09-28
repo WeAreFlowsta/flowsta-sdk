@@ -280,6 +280,13 @@ export function bindVaultIdentity(agentPubKey: string): void {
  * stores that data under `partitionKeyFor(agentPubKey)` and treats this
  * value as the pointer to the active partition.
  */
+/** `expected_identity` for a GET's query string when this app is bound
+ *  (the Vault checks it like the POST body field - 1.5.0) _(3.5.0)_. */
+function expectedIdentityQuery(prefix: '?' | '&'): string {
+  const bound = getBoundIdentity();
+  return bound ? `${prefix}expected_identity=${encodeURIComponent(bound)}` : '';
+}
+
 export function getBoundIdentity(): string | null {
   const stored = storageAvailable()?.getItem(BOUND_IDENTITY_STORAGE_KEY);
   return stored ?? _boundIdentityMemory;
@@ -436,6 +443,8 @@ interface PortProbe {
   unlocked: boolean;
   initialized: boolean;
   agentPubKey: string | null;
+  /** The identity the Vault holds, unlocked OR locked (Vault 1.5.0+). */
+  activeIdentity: string | null;
 }
 
 async function probeStatusDetail(url: string, timeoutMs = 1500): Promise<PortProbe | null> {
@@ -451,6 +460,7 @@ async function probeStatusDetail(url: string, timeoutMs = 1500): Promise<PortPro
       unlocked: !!data.unlocked,
       initialized: data.initialized !== false,
       agentPubKey: (data.agent_pub_key || data.agentPubKey || null) as string | null,
+      activeIdentity: (data.active_identity || data.agent_pub_key || null) as string | null,
     };
   } catch {
     return null;
@@ -461,12 +471,17 @@ async function probeStatusDetail(url: string, timeoutMs = 1500): Promise<PortPro
  * Rank the Vaults that answered (3.4.0). The Vault binds 27777 or the next
  * port up, and on a shared computer another OS user's Vault, or a staging
  * build, can hold a lower port - so the FIRST answer is not the right one.
- * Order: unlocked under the identity this app is bound to > unlocked >
- * initialized (locked) > any answer; ties go to the lower port.
+ * Order: unlocked under the identity this app is bound to > holding the
+ * bound identity while locked (Vault 1.5.0 says who it holds even locked,
+ * 3.5.0) > unlocked > initialized (locked) > any answer; ties go to the
+ * lower port. A locked Vault that is OURS outranks an unlocked one that is
+ * not: on a shared computer the unlocked one may be another person's.
  */
 function rankProbes(probes: PortProbe[], bound: string | null): PortProbe | null {
   const score = (p: PortProbe): number => {
-    if (p.unlocked && p.agentPubKey && bound && agentKeysMatch(bound, p.agentPubKey) === true) return 4;
+    const holdsBound = !!(bound && p.activeIdentity && agentKeysMatch(bound, p.activeIdentity) === true);
+    if (p.unlocked && holdsBound) return 5;
+    if (holdsBound) return 4;
     if (p.unlocked) return 3;
     if (p.initialized) return 2;
     return 1;
@@ -546,12 +561,30 @@ export function onIdentityChanged(
   // already switched to another identity hears about it on the first tick
   // instead of only after a second switch.
   let previous: string | null = getBoundIdentity();
+  // Vault 1.5.0 counts every identity change on the device
+  // (`identity_epoch`) and names the identity it holds even while locked
+  // (`active_identity`). Comparing epochs catches A→B→A between two
+  // polls, and a switch seen through a locked Vault; key comparison stays
+  // for older Vaults. (3.5.0)
+  let previousEpoch: number | null = null;
   let stopped = false;
   const tick = async () => {
     if (stopped) return;
     try {
       const url = await resolveVaultUrl(options.ipcUrl);
       const status = await getVaultStatus(url);
+      const held = status.activeIdentity ?? (status.unlocked ? status.agentPubKey : undefined);
+      if (typeof status.identityEpoch === 'number') {
+        const epochMoved = previousEpoch !== null && status.identityEpoch !== previousEpoch;
+        previousEpoch = status.identityEpoch;
+        if (held) {
+          if (epochMoved || (previous && agentKeysMatch(previous, held) === false)) {
+            callback(held, previous);
+          }
+          previous = held;
+        }
+        return;
+      }
       if (status.unlocked && status.agentPubKey) {
         if (previous && agentKeysMatch(previous, status.agentPubKey) === false) {
           callback(status.agentPubKey, previous);
@@ -761,6 +794,12 @@ export interface VaultStatus {
   blocked?: boolean;
   /** Agent public key (if unlocked) */
   agentPubKey?: string;
+  /** The identity the Vault holds, unlocked or locked _(Vault 1.5.0, 3.5.0)_. */
+  activeIdentity?: string;
+  /** Counts every identity change on that device _(Vault 1.5.0, 3.5.0)_. */
+  identityEpoch?: number;
+  /** Per-process id of the answering Vault _(Vault 1.5.0, 3.5.0)_. */
+  instanceId?: string;
   /** Display name of the currently-unlocked Flowsta account.
    *  Only populated when the requesting app has the `display_name` scope
    *  configured at dev.flowsta.com and the user approved it at link time. */
@@ -850,6 +889,9 @@ export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
       running: true,
       unlocked: !!data.unlocked,
       agentPubKey: data.agent_pub_key || data.agentPubKey,
+      ...(data.active_identity ? { activeIdentity: data.active_identity as string } : {}),
+      ...(typeof data.identity_epoch === 'number' ? { identityEpoch: data.identity_epoch as number } : {}),
+      ...(data.instance_id ? { instanceId: data.instance_id as string } : {}),
       displayName: data.display_name || data.displayName,
       profilePicture: data.profile_picture || data.profilePicture,
       webUsername: data.web_username || data.webUsername,
@@ -908,7 +950,7 @@ export async function getFlowstaLinkStatus(
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
-      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}`,
+      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${expectedIdentityQuery('&')}`,
       { signal: controller.signal },
     );
     clearTimeout(timeout);
@@ -1138,7 +1180,7 @@ export async function checkFlowstaLinkStatus(
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
-      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}`,
+      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${expectedIdentityQuery('&')}`,
       { signal: controller.signal },
     );
     clearTimeout(timeout);
@@ -1419,7 +1461,7 @@ export async function listVaultBackups(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const response = await fetch(`${ipcUrl}/backup/list`, {
+    const response = await fetch(`${ipcUrl}/backup/list${expectedIdentityQuery('?')}`, {
       signal: controller.signal,
     });
     clearTimeout(timeout);

@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5.0
+
+Additive. Pairs with Flowsta Vault 1.5.0 (the identity switcher); older Vaults simply omit the new fields.
+
+- `getVaultStatus` returns `activeIdentity` (the identity the Vault holds, unlocked OR locked), `identityEpoch` (counts every identity change on that device) and `instanceId` (the answering Vault process).
+- `resolveVaultUrl` ranks a locked Vault that holds the identity this app is bound to above an unlocked Vault holding someone else: loopback ports are shared by every user account on a computer, and the unlocked one may not be this person's.
+- `onIdentityChanged` compares `identityEpoch` when the Vault reports it: A→B→A between two polls is still a change, and a switch is seen through a locked Vault. Key comparison stays for older Vaults.
+- `getFlowstaLinkStatus` and `listVaultBackups` send `expected_identity` in the query string when the app is bound, like the POST calls send it in the body; a Vault under a different identity refuses them (1.5.0 checks GET queries too).
+
 ## 3.4.0
 
 Additive. Groundwork for Vault 1.5.0 (the identity switcher); works with every 1.x Vault.

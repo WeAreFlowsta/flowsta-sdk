@@ -259,6 +259,7 @@ Check if Flowsta Vault is running and unlocked. When the vault is unlocked, the 
 - `profilePicture` _(2.3.0+)_ — scope-gated by `profile_picture`
 - `webUsername` _(2.4.1+)_ — scope-gated by `username`
 - `email` + `emailVerified` _(3.2.0+, Vault 1.3.0+)_ — present only after the user allowed your app's `email` scope **in a Vault dialog** (request it on `authenticateWithVault` with `scopes: ['email']`); only a verified address is ever shared, and the user is told your app receives it as text it can keep
+- `activeIdentity` _(3.5.0+, Vault 1.5.0+)_ — the identity the Vault holds, reported unlocked or locked; `identityEpoch` counts every identity change on that device (compare epochs, not keys: A→B→A is still a change); `instanceId` names the answering Vault process
 
 Scopes are configured per `client_id` at [dev.flowsta.com](https://dev.flowsta.com); the user approves them once at link time. Fields are `undefined` until granted.
 
@@ -290,6 +291,10 @@ Every loopback call here targets `http://127.0.0.1` from your page. Who lets tha
 | Desktop apps (Tauri/Electron) | Yes | Direct path |
 
 `loopbackPermissionState()` _(3.1.0)_ returns `'granted' | 'denied' | 'prompt' | 'unknown'` if you want to explain the prompt before it appears.
+
+### `onIdentityChanged(callback, options?)`
+
+Polls the Vault (5 s by default) and calls back with `(next, previous)` when the identity it holds changes. Starts from the bound identity. With Vault 1.5.0 it compares `identityEpoch` and sees the switch even while the Vault is locked _(3.5.0)_; older Vaults are watched by key while unlocked. Returns a stop function.
 
 ### `reconnectIdentity({ clientId, localAgentPubKey })` _(3.4.0)_
 
