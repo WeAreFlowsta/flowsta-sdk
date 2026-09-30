@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentKeysMatch, FlowstaAuth, loopbackPermissionState, VaultBlockedError, VaultRequiredError } from './index';
+import { agentKeysMatch, contentRightsForWire, FlowstaAuth, loopbackPermissionState, VaultBlockedError, VaultRequiredError } from './index';
 
 // Build a plausible 39-byte agent key (0x84 0x20 0x24 prefix + 32-byte key +
 // 4-byte DHT location) and render it in both encodings agent keys actually
@@ -148,5 +148,24 @@ describe('signFile when the browser blocks the Vault (2.5.0)', () => {
     stubBrowser({ permission: null, session: true });
     const auth = new FlowstaAuth({ clientId: 'c', redirectUri: 'https://app/cb' });
     await expect(auth.signFile({ fileHash: 'a'.repeat(64) })).rejects.toBeInstanceOf(VaultRequiredError);
+  });
+});
+
+// ── content rights on the wire (2.6.0) ─────────────────────────────
+
+describe('contentRightsForWire', () => {
+  it('translates the documented camelCase keys to what the Vault and API read', () => {
+    expect(contentRightsForWire({ license: 'cc-by', aiTraining: 'not_allowed', contactPreference: 'allow_contact_requests', commercialLicensing: 'open_to_licensing' })).toEqual({
+      license: 'cc-by',
+      ai_training: 'not_allowed',
+      contact_preference: 'allow_contact_requests',
+      commercial_licensing: 'open_to_licensing',
+    });
+  });
+
+  it('passes snake_case through unchanged and drops empty values', () => {
+    expect(contentRightsForWire({ ai_training: 'allowed', license: undefined as unknown as string })).toEqual({ ai_training: 'allowed' });
+    expect(contentRightsForWire({})).toBeNull();
+    expect(contentRightsForWire(undefined)).toBeNull();
   });
 });

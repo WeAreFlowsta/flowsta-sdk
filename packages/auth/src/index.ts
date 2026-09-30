@@ -295,6 +295,33 @@ function base64UrlEncode(buffer: ArrayBuffer): string {
  * const user = auth.getUser();
  * ```
  */
+/**
+ * Content rights as the Vault and the API read them (snake_case). Accepts the
+ * documented camelCase keys (`aiTraining`, `contactPreference`,
+ * `commercialLicensing`) as well as snake_case, so either spelling lands.
+ * _(2.6.0; before, camelCase keys were passed through and silently dropped.)_
+ */
+export function contentRightsForWire(
+  rights?: Record<string, string> | null,
+): Record<string, string> | null {
+  if (!rights) return null;
+  const map: Record<string, string> = {
+    license: 'license',
+    aiTraining: 'ai_training',
+    ai_training: 'ai_training',
+    contactPreference: 'contact_preference',
+    contact_preference: 'contact_preference',
+    commercialLicensing: 'commercial_licensing',
+    commercial_licensing: 'commercial_licensing',
+  };
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(rights)) {
+    if (v === undefined || v === null) continue;
+    out[map[k] ?? k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export class FlowstaAuth {
   private config: Required<FlowstaAuthConfig>;
   private accessToken: string | null = null;
@@ -540,6 +567,10 @@ export class FlowstaAuth {
   // ── Agent Linking ────────────────────────────────────────────────
 
   /**
+   * @deprecated These lookups need a Flowsta session, not an OAuth access
+   * token: for an OAuth app the API answers 401. Holochain apps read links
+   * on their own DHT through `@flowsta/holochain`. Removed in 3.0.
+   *
    * Get agents linked to a specific agent (or the current user's agent).
    *
    * Queries the API which reads from the DHT (IsSamePersonEntry).
@@ -572,6 +603,9 @@ export class FlowstaAuth {
   }
 
   /**
+   * @deprecated See `getLinkedAgents`: needs a Flowsta session, answers 401
+   * for an OAuth app. Removed in 3.0.
+   *
    * Check if two agents are linked (verified on the DHT).
    *
    * @param agentA First agent's public key
@@ -601,6 +635,7 @@ export class FlowstaAuth {
   }
 
   // ── Sign It Methods ──────────────────────────────────────────────
+
 
   /**
    * Sign a file hash. Requires 'sign' scope.
@@ -652,7 +687,7 @@ export class FlowstaAuth {
         file_hash: options.fileHash,
         intent: options.intent || 'Authorship',
         ai_generation: options.aiGeneration || null,
-        content_rights: options.contentRights || null,
+        content_rights: contentRightsForWire(options.contentRights),
       }),
     });
 
@@ -688,7 +723,7 @@ export class FlowstaAuth {
           file_hash: options.fileHash,
           intent: options.intent || 'Authorship',
           ai_generation: options.aiGeneration || null,
-          content_rights: options.contentRights || null,
+          content_rights: contentRightsForWire(options.contentRights),
           client_id: this.config.clientId,
         }),
       });
@@ -758,13 +793,13 @@ export class FlowstaAuth {
           file_hash: f.fileHash,
           intent: f.intent,
           ai_generation: f.aiGeneration,
-          content_rights: f.contentRights,
+          content_rights: contentRightsForWire(f.contentRights),
         })),
         shared_metadata: options.sharedMetadata
           ? {
               intent: options.sharedMetadata.intent,
               ai_generation: options.sharedMetadata.aiGeneration,
-              content_rights: options.sharedMetadata.contentRights,
+              content_rights: contentRightsForWire(options.sharedMetadata.contentRights),
             }
           : undefined,
       }),

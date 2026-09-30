@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.6.0
+
+- `signFile` / `signBatch`: content rights given with the documented camelCase keys (`aiTraining`, `contactPreference`, `commercialLicensing`) are translated to what the Vault and the API read. Before, those keys passed through unchanged and were dropped, so the signature carried no rights. `contentRightsForWire()` is exported.
+- `getLinkedAgents()` and `areAgentsLinked()` are deprecated: they need a Flowsta session, and for an OAuth app the API answers 401. Removed in 3.0.
+
 ## 2.5.1
 
 - `signFile` / `signBatch`: `signed_at` is typed for both paths (a number from the Vault, an ISO string from the API fallback) instead of assuming one shape.
