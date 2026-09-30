@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.1
+
+- `signDocument`: an `identity_mismatch` refusal now carries the Vault's description as the error message and the bound identity as `expected` (3.6.0 put the description in `expected`).
+- JSDoc: `ipcUrl` defaults describe the 3.4.0 resolver (probe 27777-27779) instead of a single port.
+
 ## 3.6.0
 
 - `signDocument` publishes the signature to the Sign It network from the person's own device when the app is bound to an identity (it linked through `linkFlowstaIdentity`). Before 3.6.0 the SDK never asked the Vault to publish, so every SDK-made signature stayed local with `actionHash: null` and could not be verified. New option `publish` (default: bound), new result field `published`, new errors `PublishForbiddenError` (`tier_forbidden`: only Flowsta pages and linked apps may publish) and `QuotaExceededError` (`quota_exceeded`); `IdentityMismatchError` is now thrown from `signDocument` too.

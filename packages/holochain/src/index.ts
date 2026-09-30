@@ -673,7 +673,7 @@ export interface FlowstaBackupRetrieveOptions {
   clientId: string;
   /** Backup label to retrieve (default: "latest") */
   label?: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
 }
 
@@ -709,7 +709,7 @@ export interface FlowstaAutoBackupConfig {
   intervalMinutes?: number;
   /** Optional label (default: "latest" — overwrites each time) */
   label?: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
   /**
    * Never replace a non-empty Vault backup with an empty payload (v2.6.0+).
@@ -733,7 +733,7 @@ export interface LinkFlowstaIdentityOptions {
   clientId: string;
   /** The third-party agent's public key in uhCAk... format */
   localAgentPubKey: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
 }
 
@@ -770,7 +770,7 @@ export interface RevokeFlowstaIdentityOptions {
   appName: string;
   /** The third-party agent's public key in uhCAk... format */
   localAgentPubKey: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
 }
 
@@ -779,7 +779,7 @@ export interface CheckFlowstaLinkStatusOptions {
   clientId: string;
   /** The third-party agent's public key in uhCAk... format */
   localAgentPubKey: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
 }
 
@@ -1564,7 +1564,7 @@ export interface SignDocumentOptions {
    * be verified by anyone else. _(3.6.0; before 3.6.0 the SDK never published.)_
    */
   publish?: boolean;
-  /** IPC URL override (default: http://127.0.0.1:27777) */
+  /** IPC URL override (default: probe 27777-27779 and pick the Vault holding this app's identity) */
   ipcUrl?: string;
 }
 
@@ -1674,7 +1674,7 @@ export async function signDocument(
       if (error === 'user_denied') throw new UserDeniedError();
       if (error === 'tier_forbidden') throw new PublishForbiddenError(data.description);
       if (error === 'quota_exceeded') throw new QuotaExceededError(data.description);
-      if (error === 'identity_mismatch') throw new IdentityMismatchError(data.description);
+      if (error === 'identity_mismatch') throw new IdentityMismatchError(getBoundIdentity() || undefined, undefined, data.description);
 
       throw new FlowstaHolochainError(
         data.description || `Document signing failed: ${error}`,
@@ -1742,10 +1742,13 @@ export interface AuthenticateWithVaultOptions {
  * ("Sign in with your Vault"). Browser-safe: plain `fetch`,
  * no dependencies. The user approves in a Vault dialog (~60s).
  *
- * Pass the challenge string EXACTLY as issued by
- * `POST /auth/vault/challenge` (a `flowsta-auth-challenge:v1:…` string).
- * Post the returned `signature` + `agentPubKey` back to
- * `POST /auth/vault/token` to obtain a session.
+ * Third-party apps: pass a random nonce your OWN backend issued (any
+ * string that does not start with `flowsta-`; the Vault reserves that
+ * prefix for Flowsta pages and answers `reserved_prefix` otherwise), then
+ * have your backend verify the returned `signature` over the nonce's
+ * UTF-8 bytes with the returned `agentPubKey` and issue its own session.
+ * Flowsta's own pages pass the string issued by `POST /auth/vault/challenge`
+ * and post the result to `POST /auth/vault/token`.
  *
  * ⚠️ Encoding contract (do not "simplify"): the auth-api verifies the
  * signature over the challenge string's UTF-8 bytes, but Vault's
@@ -2195,7 +2198,7 @@ export interface RestoreFromVaultOptions {
   dispatcher: (record: BackupRecord) => Promise<void>;
   /** Optional progress callback (current, total). */
   onProgress?: (current: number, total: number) => void;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777' */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
   /** Backup label to restore. Default: 'latest'. */
   label?: string;
@@ -2316,7 +2319,7 @@ export interface FlowstaAutoBackupConfigV2 {
   heartbeatMinutes?: number;
   /** Backup label. Default: 'latest' (overwrites). */
   label?: string;
-  /** Vault IPC URL. Default: 'http://127.0.0.1:27777'. */
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity. */
   ipcUrl?: string;
   /**
    * Never replace a non-empty Vault backup with an empty payload (v2.6.0+).
