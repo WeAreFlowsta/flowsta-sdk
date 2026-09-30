@@ -32,10 +32,10 @@ export interface FlowstaUser {
   /** User's unique ID */
   id: string;
   /**
-   * User's email address. Only present when the 'email' scope was granted
-   * AND the account is legacy custodial. Device-hosted accounts (the norm)
-   * never expose an email — Flowsta's server stores only a hash. If your
-   * app needs an email address, ask the user for one directly.
+   * User's email address. Present when the app requested the 'email' scope
+   * and the person allowed sharing it, in the consent step or in their Vault.
+   * Flowsta's server stores only a hash of the address, so it is never
+   * present otherwise; apps must work without it.
    */
   email?: string;
   /** User's username (if set) */
@@ -652,7 +652,7 @@ export class FlowstaAuth {
     intent?: string;
     aiGeneration?: string;
     contentRights?: Record<string, string>;
-  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number | string; action_hash: string | null }> {
+  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number | string; action_hash: string | null; signature?: string }> {
     const token = this.getAccessToken();
     if (!token) throw new Error('Not authenticated');
 
@@ -710,7 +710,7 @@ export class FlowstaAuth {
     intent?: string;
     aiGeneration?: string;
     contentRights?: Record<string, string>;
-  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number | string; action_hash: string | null }> {
+  }): Promise<{ success: boolean; file_hash: string; agent_pub_key: string; signed_at: number | string; action_hash: string | null; signature?: string }> {
     const controller = new AbortController();
     // 60s Vault approval timeout + buffer
     const timeout = setTimeout(() => controller.abort(), 70000);
@@ -744,6 +744,10 @@ export class FlowstaAuth {
         agent_pub_key: data.agent_pub_key,
         signed_at: data.signed_at,
         action_hash: data.action_hash || null,
+        // The Vault's Ed25519 signature over the file hash (base64). Present
+        // on the Vault path only; the signature is the app's proof when the
+        // record is not published. _(2.6.1)_
+        signature: typeof data.signature === 'string' ? data.signature : undefined,
       };
     } catch (err) {
       if (err instanceof FlowstaAuthError) throw err;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.6.1
+
+- `signFile` / `signBatch` (Vault path): the result carries `signature`, the Vault's Ed25519 signature over the file hash (base64). It was dropped before, so a web app had no proof of its own signature.
+- Types: `FlowstaUser.email` documents consent-time sharing.
+- Changelog 2.5.1 corrected: `signed_at` is an ISO string from the Vault and a number from the API fallback.
+
 ## 2.6.0
 
 - `signFile` / `signBatch`: content rights given with the documented camelCase keys (`aiTraining`, `contactPreference`, `commercialLicensing`) are translated to what the Vault and the API read. Before, those keys passed through unchanged and were dropped, so the signature carried no rights. `contentRightsForWire()` is exported.
@@ -7,7 +13,7 @@
 
 ## 2.5.1
 
-- `signFile` / `signBatch`: `signed_at` is typed for both paths (a number from the Vault, an ISO string from the API fallback) instead of assuming one shape.
+- `signFile` / `signBatch`: `signed_at` is typed for both paths (an ISO string from the Vault, a number from the API fallback) instead of assuming one shape.
 
 ## 2.5.0
 
