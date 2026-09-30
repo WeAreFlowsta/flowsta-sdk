@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.6.0
+
+- `signDocument` publishes the signature to the Sign It network from the person's own device when the app is bound to an identity (it linked through `linkFlowstaIdentity`). Before 3.6.0 the SDK never asked the Vault to publish, so every SDK-made signature stayed local with `actionHash: null` and could not be verified. New option `publish` (default: bound), new result field `published`, new errors `PublishForbiddenError` (`tier_forbidden`: only Flowsta pages and linked apps may publish) and `QuotaExceededError` (`quota_exceeded`); `IdentityMismatchError` is now thrown from `signDocument` too.
+- Backups: the documented default label `latest` is applied when no label is given (`backupToVault`, `retrieveFromVault`, `restoreFromVault`, `startAutoBackup` entries). Before, an unlabeled write produced a new snapshot each time and restore relied on the Vault picking the newest.
+- `getVaultStatus` returns `did` (the Permanent ID) when the Vault reports it.
+- `SigningDnaNotInstalledError` is deprecated: the Vault never emits that code, so it was never thrown. Removed in 4.0.
+
 ## 3.5.0
 
 Additive. Pairs with Flowsta Vault 1.5.0 (the identity switcher); older Vaults simply omit the new fields.

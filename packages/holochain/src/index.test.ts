@@ -24,6 +24,9 @@ import {
   retrieveFromVault,
   VaultLockedError,
   VaultNotFoundError,
+  signDocument,
+  PublishForbiddenError,
+  QuotaExceededError,
 } from './index';
 
 // ── helpers ────────────────────────────────────────────────────────
@@ -574,5 +577,87 @@ describe('onIdentityChanged via identity_epoch (3.5.0)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── signDocument publishes for linked apps (3.6.0) ─────────────────
+
+describe('signDocument', () => {
+  const statusOk = { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A), active_identity: b64url(KEY_A) };
+
+  function signRoute(onSign: (body: Record<string, unknown>) => Response) {
+    mockFetch((url, init) => {
+      if (url.endsWith('/status')) return json(200, statusOk);
+      if (url.endsWith('/sign-document')) return onSign(JSON.parse(String(init?.body)));
+      return null;
+    });
+  }
+
+  it('asks the Vault to publish when the app is bound to an identity', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    let sent: Record<string, unknown> = {};
+    signRoute((body) => {
+      sent = body;
+      return json(200, { file_hash: 'ab', signature: 's', agent_pub_key: b64url(KEY_A), signed_at: 'now', action_hash: 'deadbeef' });
+    });
+    const r = await signDocument({ clientId: 'c', appName: 'A', fileHash: 'ab' });
+    expect(sent.commit).toBe(true);
+    expect(sent.expected_identity).toBe(b64url(KEY_A));
+    expect(r.published).toBe(true);
+    expect(r.actionHash).toBe('deadbeef');
+  });
+
+  it('signs without publishing when the app is not bound, and says so', async () => {
+    let sent: Record<string, unknown> = {};
+    signRoute((body) => {
+      sent = body;
+      return json(200, { file_hash: 'ab', signature: 's', agent_pub_key: b64url(KEY_A), signed_at: 'now', action_hash: null });
+    });
+    const r = await signDocument({ clientId: 'c', appName: 'A', fileHash: 'ab' });
+    expect(sent.commit).toBe(false);
+    expect(r.published).toBe(false);
+    expect(r.actionHash).toBeNull();
+  });
+
+  it('honours an explicit publish flag either way', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    let sent: Record<string, unknown> = {};
+    signRoute((body) => {
+      sent = body;
+      return json(200, { file_hash: 'ab', signature: 's', agent_pub_key: b64url(KEY_A), signed_at: 'now', action_hash: null });
+    });
+    await signDocument({ clientId: 'c', appName: 'A', fileHash: 'ab', publish: false });
+    expect(sent.commit).toBe(false);
+  });
+
+  it('maps the Vault publish refusals to typed errors', async () => {
+    bindVaultIdentity(b64url(KEY_A));
+    signRoute(() => json(403, { error: 'tier_forbidden', description: 'link first' }));
+    await expect(signDocument({ clientId: 'c', appName: 'A', fileHash: 'ab' })).rejects.toBeInstanceOf(PublishForbiddenError);
+    signRoute(() => json(403, { error: 'quota_exceeded', description: 'used up' }));
+    await expect(signDocument({ clientId: 'c', appName: 'A', fileHash: 'ab' })).rejects.toBeInstanceOf(QuotaExceededError);
+  });
+});
+
+describe('3.6.0 additions', () => {
+  it('getVaultStatus carries the Permanent ID when the Vault reports it', async () => {
+    mockFetch(() => json(200, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A), did: 'did:flowsta:' + b64url(KEY_A) }));
+    const s = await getVaultStatus(IPC);
+    expect(s.did).toBe('did:flowsta:' + b64url(KEY_A));
+  });
+
+  it('backupToVault writes the documented default label', async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((url, init) => {
+      if (url.endsWith('/status')) return json(200, { unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) });
+      if (url.endsWith('/backup/list')) return json(200, { backups: [] });
+      if (url.endsWith('/backup')) {
+        sent = JSON.parse(String(init?.body));
+        return json(200, { success: true, label: sent.label, data_size: 2, created_at: 1 });
+      }
+      return null;
+    });
+    await backupToVault({ clientId: 'c', appName: 'A', ipcUrl: IPC }, { a: 1 });
+    expect(sent.label).toBe('latest');
   });
 });

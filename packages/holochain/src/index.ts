@@ -794,6 +794,8 @@ export interface VaultStatus {
   blocked?: boolean;
   /** Agent public key (if unlocked) */
   agentPubKey?: string;
+  /** The identity's Permanent ID, `did:flowsta:<agent key>` (if unlocked) _(3.6.0)_. */
+  did?: string;
   /** The identity the Vault holds, unlocked or locked _(Vault 1.5.0, 3.5.0)_. */
   activeIdentity?: string;
   /** Counts every identity change on that device _(Vault 1.5.0, 3.5.0)_. */
@@ -889,6 +891,7 @@ export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
       running: true,
       unlocked: !!data.unlocked,
       agentPubKey: data.agent_pub_key || data.agentPubKey,
+      ...(data.did ? { did: data.did as string } : {}),
       ...(data.active_identity ? { activeIdentity: data.active_identity as string } : {}),
       ...(typeof data.identity_epoch === 'number' ? { identityEpoch: data.identity_epoch as number } : {}),
       ...(data.instance_id ? { instanceId: data.instance_id as string } : {}),
@@ -1255,7 +1258,7 @@ export async function backupToVault(
   const body = JSON.stringify({
     client_id: options.clientId,
     app_name: options.appName,
-    label: options.label,
+    label: options.label ?? 'latest',
     data,
     content_type: options.contentType,
     // Server-side gate: the Vault (1.3.0+) refuses the write when its
@@ -1348,7 +1351,7 @@ export async function retrieveFromVault(
       signal: controller.signal,
       body: JSON.stringify({
         client_id: options.clientId,
-        label: options.label,
+        label: options.label ?? 'latest',
         expected_identity: getBoundIdentity() || undefined,
       }),
     });
@@ -1423,7 +1426,7 @@ export async function wouldOverwriteNonEmptyBackup(
       signal: controller.signal,
       body: JSON.stringify({
         client_id: options.clientId,
-        label: options.label,
+        label: options.label ?? 'latest',
       }),
     });
     clearTimeout(timeout);
@@ -1493,6 +1496,10 @@ export async function listVaultBackups(
 
 // ── Sign It: Document Signing ─────────────────────────────────────
 
+/**
+ * @deprecated The Vault never emits `signing_dna_not_installed`; this error is
+ * never thrown. Kept so existing `catch` branches still compile. Removed in 4.0.
+ */
 export class SigningDnaNotInstalledError extends FlowstaHolochainError {
   constructor() {
     super(
@@ -1500,6 +1507,29 @@ export class SigningDnaNotInstalledError extends FlowstaHolochainError {
       'signing_dna_not_installed',
     );
     this.name = 'SigningDnaNotInstalledError';
+  }
+}
+
+/** The Vault refused to publish: only Flowsta pages and LINKED apps may
+ *  publish a signature to the Sign It network. Link the app first
+ *  (`linkFlowstaIdentity`), or sign without `publish`. _(3.6.0)_ */
+export class PublishForbiddenError extends FlowstaHolochainError {
+  constructor(description?: string) {
+    super(
+      description || 'Only a linked app can publish a signature. Link the app in the Vault first.',
+      'tier_forbidden',
+      description,
+    );
+    this.name = 'PublishForbiddenError';
+  }
+}
+
+/** The signing quota for this period is used up (the person's plan, and the
+ *  sponsor pool when the app sponsors). _(3.6.0)_ */
+export class QuotaExceededError extends FlowstaHolochainError {
+  constructor(description?: string) {
+    super(description || 'The signing quota for this period is used up.', 'quota_exceeded', description);
+    this.name = 'QuotaExceededError';
   }
 }
 
@@ -1523,6 +1553,17 @@ export interface SignDocumentOptions {
     aiTraining?: 'allowed' | 'allowed_with_attribution' | 'requires_license' | 'not_allowed';
     contactPreference?: 'no_contact' | 'allow_contact_requests';
   };
+  /**
+   * Publish the signature to the Sign It network from the person's own
+   * device, so anyone can verify the file. Default: `true` when this app is
+   * bound to an identity (it linked through `linkFlowstaIdentity`), `false`
+   * otherwise. The Vault permits publishing only from Flowsta pages and
+   * LINKED apps (`PublishForbiddenError`), and every publish draws on the
+   * person's signing quota (`QuotaExceededError`). A signature made without
+   * publishing is returned to the app but is not on the network and cannot
+   * be verified by anyone else. _(3.6.0; before 3.6.0 the SDK never published.)_
+   */
+  publish?: boolean;
   /** IPC URL override (default: http://127.0.0.1:27777) */
   ipcUrl?: string;
 }
@@ -1536,17 +1577,20 @@ export interface SignDocumentResult {
   agentPubKey: string;
   /** ISO 8601 timestamp */
   signedAt: string;
-  /** DHT action hash (null if signing DNA not yet active on conductor) */
+  /** Action hash of the published record (hex). `null` when the signature
+   *  was not published (`publish: false`, or an app that is not linked). */
   actionHash: string | null;
+  /** Whether the signature was published to the Sign It network. _(3.6.0)_ */
+  published: boolean;
 }
 
 /**
  * Sign a document hash via the Flowsta Vault IPC server.
  *
  * The user sees an approval dialog in the Vault showing the app name,
- * file label, and hash. If approved, the Vault signs the hash with
- * the user's Ed25519 device key and commits a SignatureRecord to the
- * signing DNA on the local conductor.
+ * file label, and hash. If approved, the Vault signs the hash with the
+ * user's Ed25519 device key and, for a linked app (the default), publishes
+ * the record to the Sign It network from the person's own device.
  *
  * @example
  * ```typescript
@@ -1573,7 +1617,9 @@ export interface SignDocumentResult {
  * @throws {VaultNotFoundError} Vault is not running
  * @throws {VaultLockedError} Vault is locked
  * @throws {UserDeniedError} User rejected the signing request
- * @throws {SigningDnaNotInstalledError} Signing DNA not available
+ * @throws {PublishForbiddenError} Publishing asked for by an app that is not linked
+ * @throws {QuotaExceededError} The signing quota for this period is used up
+ * @throws {IdentityMismatchError} The Vault holds a different identity than this app is bound to
  */
 export async function signDocument(
   options: SignDocumentOptions,
@@ -1582,6 +1628,9 @@ export async function signDocument(
 
   // Running + unlocked + bound-identity assertion (one insertion point).
   await requireUnlockedVault(ipcUrl);
+
+  const boundIdentity = getBoundIdentity();
+  const publish = options.publish ?? boundIdentity !== null;
 
   // Request document signature
   const controller = new AbortController();
@@ -1595,7 +1644,9 @@ export async function signDocument(
       body: JSON.stringify({
         // The Vault refuses this call under a different identity than the
         // one this app is bound to (3.4.0; backups sent it since 3.0.0).
-        expected_identity: getBoundIdentity() || undefined,
+        expected_identity: boundIdentity || undefined,
+        // Publish from the person's device (the Vault's `commit`).
+        commit: publish,
         file_hash: options.fileHash,
         label: options.label,
         intent: options.intent,
@@ -1621,7 +1672,9 @@ export async function signDocument(
 
       if (error === 'vault_locked') throw new VaultLockedError();
       if (error === 'user_denied') throw new UserDeniedError();
-      if (error === 'signing_dna_not_installed') throw new SigningDnaNotInstalledError();
+      if (error === 'tier_forbidden') throw new PublishForbiddenError(data.description);
+      if (error === 'quota_exceeded') throw new QuotaExceededError(data.description);
+      if (error === 'identity_mismatch') throw new IdentityMismatchError(data.description);
 
       throw new FlowstaHolochainError(
         data.description || `Document signing failed: ${error}`,
@@ -1639,6 +1692,7 @@ export async function signDocument(
       agentPubKey: data.agent_pub_key,
       signedAt: data.signed_at,
       actionHash: data.action_hash || null,
+      published: publish && !!data.action_hash,
     };
   } catch (err) {
     clearTimeout(timeout);
