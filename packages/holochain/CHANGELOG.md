@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.7.0
+
+Additive. Pairs with Flowsta Vault 1.6.0, where a person's identity can live on several devices; older Vaults ignore the new option and omit the new fields.
+
+- `retrieveFromVault({ across: 'devices' })` returns the newest backup with that label on any of the person's devices, and `fromDevice` says which device wrote it (`null` for this one). Without the option the call returns this device's own backup, as before: an app on a second device starts as a fresh install there.
+- `listVaultBackups` returns `otherDevices` (for each other device, the labels it holds for this app) when there are any.
+
 ## 3.6.1
 
 - `signDocument`: an `identity_mismatch` refusal now carries the Vault's description as the error message and the bound identity as `expected` (3.6.0 put the description in `expected`).

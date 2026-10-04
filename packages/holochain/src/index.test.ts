@@ -159,6 +159,41 @@ describe('retrieveFromVault', () => {
     );
   });
 
+  it("across: 'devices' asks for the newest on any device and says which device wrote it", async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((_url, init) => {
+      sent = JSON.parse(String(init?.body));
+      return json(200, { data: { n: 1 }, label: 'recovery', created_at: 5, data_size: 7, from_device: 'abc' });
+    });
+    const backup = await retrieveFromVault({ clientId: 'c', label: 'recovery', across: 'devices', ipcUrl: IPC });
+    expect(sent.across).toBe('devices');
+    expect(backup).toMatchObject({ label: 'recovery', fromDevice: 'abc' });
+  });
+
+  it('without the option nothing new is sent and nothing new comes back', async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((_url, init) => {
+      sent = JSON.parse(String(init?.body));
+      return json(200, { data: {}, label: 'latest', created_at: 5, data_size: 2 });
+    });
+    const backup = await retrieveFromVault({ clientId: 'c', ipcUrl: IPC });
+    expect('across' in sent).toBe(false);
+    expect(backup && 'fromDevice' in backup).toBe(false);
+  });
+
+  it('listVaultBackups reports what the other devices hold when the Vault says so', async () => {
+    mockFetch(() =>
+      json(200, {
+        app_count: 1, total_backups: 1, total_size: 3, apps: [],
+        other_devices: [{ device: 'abc', backups: [{ label: 'recovery', created_at: 5, data_size: 7 }] }],
+      }),
+    );
+    const stats = await listVaultBackups(IPC);
+    expect(stats.otherDevices).toEqual([{ device: 'abc', backups: [{ label: 'recovery', createdAt: 5, dataSize: 7 }] }]);
+    mockFetch(() => json(200, { app_count: 0, total_backups: 0, total_size: 0, apps: [] }));
+    expect('otherDevices' in (await listVaultBackups(IPC))).toBe(false);
+  });
+
   it('sends expected_identity when bound', async () => {
     bindVaultIdentity(b64url(KEY_A));
     let sentBody = '';

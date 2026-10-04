@@ -673,8 +673,22 @@ export interface FlowstaBackupRetrieveOptions {
   clientId: string;
   /** Backup label to retrieve (default: "latest") */
   label?: string;
+  /**
+   * `'devices'`: the newest backup with this label on ANY of the person's
+   * devices, not only this one (Vault 1.6.0+; an older Vault answers with
+   * this device's own). For data that belongs to the person rather than to
+   * one install. Omitted: this device's own backup, as always.
+   */
+  across?: 'devices';
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
+}
+
+/** The backups one of the person's other devices holds for this app. */
+export interface FlowstaOtherDeviceBackups {
+  /** An opaque id for that device (stable; not a name). */
+  device: string;
+  backups: Array<{ label?: string; createdAt: number; dataSize: number }>;
 }
 
 export interface FlowstaBackupEntry {
@@ -696,6 +710,8 @@ export interface FlowstaBackupStats {
   totalBackups: number;
   totalSize: number;
   apps: FlowstaBackupEntry[];
+  /** What the person's other devices hold for this app (Vault 1.6.0+; absent when there is none). */
+  otherDevices?: FlowstaOtherDeviceBackups[];
 }
 
 export interface FlowstaAutoBackupConfig {
@@ -1337,7 +1353,14 @@ export async function backupToVault(
  */
 export async function retrieveFromVault(
   options: FlowstaBackupRetrieveOptions,
-): Promise<{ data: unknown; label?: string; createdAt: number; dataSize: number } | null> {
+): Promise<{
+  data: unknown;
+  label?: string;
+  createdAt: number;
+  dataSize: number;
+  /** With `across: 'devices'`: the device that wrote it, `null` for this one. */
+  fromDevice?: string | null;
+} | null> {
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
 
   let response: Response;
@@ -1353,6 +1376,7 @@ export async function retrieveFromVault(
         client_id: options.clientId,
         label: options.label ?? 'latest',
         expected_identity: getBoundIdentity() || undefined,
+        ...(options.across ? { across: options.across } : {}),
       }),
     });
     clearTimeout(timeout);
@@ -1389,6 +1413,7 @@ export async function retrieveFromVault(
     label: result.label,
     createdAt: result.created_at,
     dataSize: result.data_size,
+    ...('from_device' in result ? { fromDevice: result.from_device as string | null } : {}),
   };
 }
 
@@ -1484,6 +1509,18 @@ export async function listVaultBackups(
         lastBackupAt: a.last_backup_at,
         ...(Array.isArray(a.labels) ? { labels: a.labels as string[] } : {}),
       })),
+      ...(Array.isArray(data.other_devices)
+        ? {
+            otherDevices: data.other_devices.map((d: Record<string, unknown>) => ({
+              device: d.device as string,
+              backups: ((d.backups as Array<Record<string, unknown>>) || []).map((b) => ({
+                label: b.label as string | undefined,
+                createdAt: b.created_at as number,
+                dataSize: b.data_size as number,
+              })),
+            })),
+          }
+        : {}),
     };
   } catch {
     return empty;
