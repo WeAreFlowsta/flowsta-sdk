@@ -210,7 +210,7 @@ const stats = await listVaultBackups();
 const elsewhere = stats.otherDevices ?? [];
 ```
 
-Which labels to read across devices is the app's decision: things that belong to the **person** (a recovery label carrying the app's own keys, a document they expect on every device) are read across; things that belong to the **install** (a per-device index, a cache) are not. Writes always land in this device's own slot. A replay restore (`restoreFromVault`) must be switched off when another device already holds the data — it would author every record again as new.
+Which labels to read across devices is the app's decision: things that belong to the **person** (a recovery label carrying the app's own keys, a document they expect on every device) are read across; things that belong to the **install** (a per-device index, a cache) are not. Writes always land in this device's own slot. A replay restore (`restoreFromVault`) must be switched off when another device already holds the data - it would author every record again as new.
 
 ### CAL §4.2.1 — keys come from the Vault, not the backup _(2.4.0+)_
 
