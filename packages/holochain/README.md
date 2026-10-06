@@ -193,6 +193,25 @@ if (ours && ours.backupCount > 0 && /* local source chain is empty */) {
 
 On the Rust side, `restore_record` is the symmetric `match` — decode the entry, then call the matching zome function.
 
+### Backups across the person's devices _(3.7.0, Vault 1.6.0+)_
+
+From Vault 1.6.0 a person's identity can live on several devices, and each of their Vaults keeps a copy of the backups made on the others. Two additive options read across them; without them every call behaves as before, and older Vaults ignore them.
+
+```typescript
+import { retrieveFromVault, listVaultBackups } from '@flowsta/holochain';
+
+// The newest backup under this label on ANY of the person's devices (this one included).
+// `across` needs a `label`; `fromDevice` is null when it was made on this device,
+// otherwise an opaque id for the device that made it.
+const recovery = await retrieveFromVault({ clientId, label: 'recovery', across: 'devices' });
+
+// What the other devices hold for this app: [{ device, backups: [{ label, createdAt, dataSize }] }]
+const stats = await listVaultBackups();
+const elsewhere = stats.otherDevices ?? [];
+```
+
+Which labels to read across devices is the app's decision: things that belong to the **person** (a recovery label carrying the app's own keys, a document they expect on every device) are read across; things that belong to the **install** (a per-device index, a cache) are not. Writes always land in this device's own slot. A replay restore (`restoreFromVault`) must be switched off when another device already holds the data — it would author every record again as new.
+
 ### CAL §4.2.1 — keys come from the Vault, not the backup _(2.4.0+)_
 
 A `BackupPayload` carries **data only**. It does not — and should not — carry the user's cryptographic keys: their identity lives in their Flowsta Vault, and your app never holds the key material.
