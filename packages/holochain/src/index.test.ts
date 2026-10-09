@@ -22,6 +22,8 @@ import {
   partitionKeyFor,
   PARTITION_KEY_LENGTH,
   retrieveFromVault,
+  getAppSecret,
+  getAppNetworkSecret,
   VaultLockedError,
   VaultNotFoundError,
   signDocument,
@@ -694,5 +696,131 @@ describe('3.6.0 additions', () => {
     });
     await backupToVault({ clientId: 'c', appName: 'A', ipcUrl: IPC }, { a: 1 });
     expect(sent.label).toBe('latest');
+  });
+});
+
+// ── app secrets (3.8.0) ─────────────────────────────────────────────
+
+describe('getAppSecret', () => {
+  it('returns the hex the Vault derived for this label', async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((url, init) => {
+      if (url.endsWith('/app-secret')) {
+        sent = JSON.parse(String(init?.body));
+        return json(200, { success: true, label: 'network', secret_hex: 'ab'.repeat(32), derivation: 'flowsta-app-secret-v1' });
+      }
+      return null;
+    });
+    const r = await getAppSecret({ label: 'network', ipcUrl: IPC });
+    expect(sent.label).toBe('network');
+    expect(r).toEqual({ secretHex: 'ab'.repeat(32), label: 'network' });
+  });
+
+  it('is null on a Vault that cannot answer (older, or no device-hosted seed)', async () => {
+    mockFetch(() => new Response('not found', { status: 404 }));
+    await expect(getAppSecret({ label: 'network', ipcUrl: IPC })).resolves.toBe(null);
+    mockFetch(() => json(409, { error: 'not_available' }));
+    await expect(getAppSecret({ label: 'network', ipcUrl: IPC })).resolves.toBe(null);
+  });
+
+  it('needs the Vault unlocked', async () => {
+    mockFetch(() => json(403, { error: 'vault_locked' }));
+    await expect(getAppSecret({ label: 'network', ipcUrl: IPC })).rejects.toBeInstanceOf(VaultLockedError);
+  });
+});
+
+describe('getAppNetworkSecret', () => {
+  const opts = { clientId: 'c', appName: 'App', ipcUrl: IPC };
+
+  it("keeps the secret this device's backup already carries, before anything else", async () => {
+    const calls: string[] = [];
+    mockFetch((url, init) => {
+      calls.push(url.replace(IPC, '') + (init?.body ? ':' + (JSON.parse(String(init.body)).across ?? 'own') : ''));
+      if (url.endsWith('/backup/retrieve')) return json(200, { data: { secret_hex: '11'.repeat(32) }, label: 'app-network', created_at: 1, data_size: 1 });
+      return null;
+    });
+    const r = await getAppNetworkSecret(opts);
+    expect(r).toEqual({ secretHex: '11'.repeat(32), source: 'existing' });
+    expect(calls).toEqual(['/backup/retrieve:own']);
+  });
+
+  it("takes another device's copy before deriving", async () => {
+    mockFetch((url, init) => {
+      if (url.endsWith('/backup/retrieve')) {
+        const body = JSON.parse(String(init?.body));
+        return body.across === 'devices'
+          ? json(200, { data: { secret_hex: '22'.repeat(32) }, label: 'app-network', created_at: 1, data_size: 1, from_device: 'dev-b' })
+          : json(404, { error: 'backup_not_found' });
+      }
+      return null;
+    });
+    await expect(getAppNetworkSecret(opts)).resolves.toEqual({ secretHex: '22'.repeat(32), source: 'existing' });
+  });
+
+  it('derives when no backup carries one, and writes the slot for older Vaults', async () => {
+    let written: Record<string, unknown> | null = null;
+    mockFetch((url, init) => {
+      if (url.endsWith('/backup/retrieve')) return json(404, { error: 'backup_not_found' });
+      if (url.endsWith('/app-secret')) return json(200, { success: true, label: 'app-network', secret_hex: '33'.repeat(32) });
+      if (url.endsWith('/backup')) {
+        written = JSON.parse(String(init?.body));
+        return json(200, { success: true, label: 'app-network', data_size: 1, created_at: 1 });
+      }
+      return null;
+    });
+    await expect(getAppNetworkSecret(opts)).resolves.toEqual({ secretHex: '33'.repeat(32), source: 'derived' });
+    expect(written?.label).toBe('app-network');
+    expect(JSON.stringify(written)).toContain('33'.repeat(32));
+  });
+
+  it('makes a random one on a Vault without the route, and writes it to the slot', async () => {
+    let written: Record<string, unknown> | null = null;
+    mockFetch((url, init) => {
+      if (url.endsWith('/backup/retrieve')) return json(404, { error: 'backup_not_found' });
+      if (url.endsWith('/app-secret')) return new Response('not found', { status: 404 });
+      if (url.endsWith('/backup')) {
+        written = JSON.parse(String(init?.body));
+        return json(200, { success: true, label: 'app-network', data_size: 1, created_at: 1 });
+      }
+      return null;
+    });
+    const r = await getAppNetworkSecret(opts);
+    expect(r.source).toBe('created');
+    expect(r.secretHex).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(written)).toContain(r.secretHex);
+  });
+
+  it('a locked Vault is an error, never a new secret', async () => {
+    mockFetch((url) => (url.endsWith('/backup/retrieve') ? json(403, { error: 'vault_never_unlocked' }) : null));
+    await expect(getAppNetworkSecret(opts)).rejects.toBeInstanceOf(VaultLockedError);
+  });
+});
+
+describe("retrieveFromVault({ across: 'devices', device })", () => {
+  it('names the device whose copy to read', async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((url, init) => {
+      if (url.endsWith('/backup/retrieve')) {
+        sent = JSON.parse(String(init?.body));
+        return json(200, { data: {}, label: 'manifest', created_at: 1, data_size: 1, from_device: 'dev-b' });
+      }
+      return null;
+    });
+    const r = await retrieveFromVault({ clientId: 'c', label: 'manifest', across: 'devices', device: 'dev-b', ipcUrl: IPC });
+    expect(sent.device).toBe('dev-b');
+    expect(r?.fromDevice).toBe('dev-b');
+  });
+
+  it('never sends device without across', async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((url, init) => {
+      if (url.endsWith('/backup/retrieve')) {
+        sent = JSON.parse(String(init?.body));
+        return json(200, { data: {}, label: 'manifest', created_at: 1, data_size: 1 });
+      }
+      return null;
+    });
+    await retrieveFromVault({ clientId: 'c', label: 'manifest', device: 'dev-b', ipcUrl: IPC });
+    expect('device' in sent).toBe(false);
   });
 });

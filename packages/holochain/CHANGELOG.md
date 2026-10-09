@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.8.0
+
+Additive. Pairs with Flowsta Vault 1.6.1; older Vaults answer the new call with "not available" and ignore the new option.
+
+- `getAppSecret({ label })`: a 32-byte secret for this app and label that is the same on every one of the person's devices - the Vault derives it from the identity seed, scoped to the app. `null` on an older Vault.
+- `getAppNetworkSecret({ clientId, appName, label? })`: one private-network secret per identity per app, in an order that never changes a secret an identity already has (this device's backup, another device's, the derived one, a random one written to the slot). Use it as the DNA's `network_seed` so an app installed on several devices with the same identity shares one private network.
+- `retrieveFromVault({ across: 'devices', device })`: the copy held from one named device (an id from `listVaultBackups().otherDevices`) instead of the newest - to read every sibling's copy of a per-device label.
+
 ## 3.7.0
 
 Additive. Pairs with Flowsta Vault 1.6.0, where a person's identity can live on several devices; older Vaults ignore the new option and omit the new fields.

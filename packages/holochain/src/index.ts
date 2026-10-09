@@ -680,6 +680,12 @@ export interface FlowstaBackupRetrieveOptions {
    * one install. Omitted: this device's own backup, as always.
    */
   across?: 'devices';
+  /**
+   * With `across: 'devices'`: the copy held from this one device (a `device`
+   * id from `listVaultBackups().otherDevices`) instead of the newest - so an
+   * app can read EVERY sibling's copy of a per-device label (Vault 1.6.1+).
+   */
+  device?: string;
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
 }
@@ -1377,6 +1383,7 @@ export async function retrieveFromVault(
         label: options.label ?? 'latest',
         expected_identity: getBoundIdentity() || undefined,
         ...(options.across ? { across: options.across } : {}),
+        ...(options.across && options.device ? { device: options.device } : {}),
       }),
     });
     clearTimeout(timeout);
@@ -1415,6 +1422,133 @@ export async function retrieveFromVault(
     dataSize: result.data_size,
     ...('from_device' in result ? { fromDevice: result.from_device as string | null } : {}),
   };
+}
+
+export interface FlowstaAppSecretOptions {
+  /** What the secret is for, 1-64 of letters, digits, `.`, `_`, `-` (e.g. `'network'`). */
+  label: string;
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
+  ipcUrl?: string;
+}
+
+/**
+ * A 32-byte secret for this app and label that is the SAME on every one of
+ * the person's devices (Vault 1.6.1+): the Vault derives it from the identity
+ * seed, scoped to this app, so no device has to copy it from another. Use it
+ * as a private network seed or a data key. Needs the Vault unlocked.
+ *
+ * Returns `null` on a Vault that cannot answer (older than 1.6.1, or an
+ * identity with no device-hosted seed) - fall back to a backup-carried
+ * secret, which `getAppNetworkSecret` does for you.
+ */
+export async function getAppSecret(
+  options: FlowstaAppSecretOptions,
+): Promise<{ secretHex: string; label: string } | null> {
+  const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  let response: Response;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    response = await fetch(`${ipcUrl}/app-secret`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({ label: options.label, expected_identity: getBoundIdentity() || undefined }),
+    });
+    clearTimeout(timeout);
+  } catch {
+    throw new VaultNotFoundError();
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (response.status === 404 || err.error === 'not_available') return null;
+    if (err.error === 'vault_locked' || err.error === 'vault_never_unlocked') throw new VaultLockedError();
+    if (err.error === 'identity_mismatch') {
+      throw new IdentityMismatchError(getBoundIdentity() || undefined, undefined, err.description);
+    }
+    throw new FlowstaHolochainError(err.description || 'App secret failed', err.error || 'app_secret_failed', err.description);
+  }
+  const result = await response.json();
+  return { secretHex: String(result.secret_hex), label: String(result.label ?? options.label) };
+}
+
+export interface FlowstaAppNetworkSecretOptions {
+  /** Developer client_id */
+  clientId: string;
+  /** Human-readable app name (for the backup that carries the secret on older Vaults) */
+  appName: string;
+  /** The backup label and secret label (default `'app-network'`). */
+  label?: string;
+  /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
+  ipcUrl?: string;
+}
+
+export interface FlowstaAppNetworkSecret {
+  /** 32 bytes as hex - use as the DNA's `network_seed` (and, hashed with a second label, a data key). */
+  secretHex: string;
+  /**
+   * `existing`: read from a backup (this device's or another's) - the secret
+   * this identity already uses; `derived`: the Vault derived it (1.6.1+);
+   * `created`: made here at random and written to this device's backup slot
+   * for the other devices to find.
+   */
+  source: 'existing' | 'derived' | 'created';
+}
+
+/**
+ * One private-network secret per identity per app, the same on every one of
+ * the person's devices: what makes "install on each device, sign in with
+ * the same identity, everything syncs" possible for a Holochain app.
+ *
+ * Order, so a secret never changes once an identity has one: a backup under
+ * `label` on this device, then on any other device (`across: 'devices'`),
+ * then the Vault-derived secret (1.6.1+; the same on every device, with no
+ * copy to wait for), and only then a random one written to this device's
+ * backup slot. A derived or created secret is also written to the slot so a
+ * device on an older Vault finds the same one across devices.
+ *
+ * Use `secretHex` as the DNA's `network_seed`; give every device its OWN
+ * agent key on that network (never the same key on two conductors); list
+ * at a founding anchor; treat a deletion as a record. Needs the Vault
+ * unlocked (throws `VaultLockedError`).
+ */
+export async function getAppNetworkSecret(
+  options: FlowstaAppNetworkSecretOptions,
+): Promise<FlowstaAppNetworkSecret> {
+  const label = options.label ?? 'app-network';
+  const fromBackup = (b: { data: unknown } | null): string | null => {
+    const d = b?.data as { secret_hex?: unknown } | undefined;
+    return typeof d?.secret_hex === 'string' && /^[0-9a-f]{64}$/i.test(d.secret_hex) ? d.secret_hex : null;
+  };
+  const own = fromBackup(await retrieveFromVault({ clientId: options.clientId, label, ipcUrl: options.ipcUrl }));
+  if (own) return { secretHex: own, source: 'existing' };
+  const elsewhere = fromBackup(
+    await retrieveFromVault({ clientId: options.clientId, label, across: 'devices', ipcUrl: options.ipcUrl }),
+  );
+  if (elsewhere) return { secretHex: elsewhere, source: 'existing' };
+
+  const derived = await getAppSecret({ label, ipcUrl: options.ipcUrl });
+  let secretHex: string;
+  let source: FlowstaAppNetworkSecret['source'];
+  if (derived) {
+    secretHex = derived.secretHex;
+    source = 'derived';
+  } else {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    secretHex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    source = 'created';
+  }
+  try {
+    await backupToVault(
+      { clientId: options.clientId, appName: options.appName, label, ipcUrl: options.ipcUrl, protectNonEmpty: false },
+      { secret_hex: secretHex, source },
+    );
+  } catch {
+    // The slot write is a courtesy for older Vaults on other devices; the
+    // secret itself is already in hand.
+  }
+  return { secretHex, source };
 }
 
 /**

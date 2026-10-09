@@ -212,6 +212,30 @@ const elsewhere = stats.otherDevices ?? [];
 
 Which labels to read across devices is the app's decision: things that belong to the **person** (a recovery label carrying the app's own keys, a document they expect on every device) are read across; things that belong to the **install** (a per-device index, a cache) are not. Writes always land in this device's own slot. A replay restore (`restoreFromVault`) must be switched off when another device already holds the data - it would author every record again as new.
 
+### One identity, several devices: one private network per app _(3.8.0, Vault 1.6.1+)_
+
+A person installs your app on each of their devices and signs in with the same Flowsta identity on each. For the app's own Holochain data to sync between those installs they must be on **one private network** - the same `network_seed` on every device - and the Vault can hand your app exactly that:
+
+```typescript
+import { getAppNetworkSecret } from '@flowsta/holochain';
+
+// Before installing your DNA on a signed-in device:
+const { secretHex, source } = await getAppNetworkSecret({ clientId, appName: 'My App' });
+// Use secretHex as the DNA's network_seed (and, hashed with a second label, as a data key).
+```
+
+`getAppNetworkSecret` never changes a secret an identity already has: it reads a backup under the label on this device, then on any other device, then asks the Vault for the derived secret (`getAppSecret`, Vault 1.6.1+ - the same on every device, nothing to copy or wait for), and only then makes a random one and writes it to this device's backup slot for the others to find. Needs the Vault unlocked.
+
+The five rules that make the rest work, learned building Your Own AI on it:
+
+1. **Every device has its own agent key** on that network. Never the same key on two conductors - gossip fails silently.
+2. **List at a founding anchor.** The first device's agent key (or any fixed hash) is the address every device links and reads at; the private half is never needed for an address, so losing the first device loses nothing.
+3. **Latest wins, by `updated_at` then author,** for anything two devices may both write; keep every version (history is free).
+4. **A deletion is a record.** Never rely on deleting the other device's entry (author-only); write a tombstone every reader honours.
+5. **Devices on different Holochain generations wait** with a clear message; the Vault's backup copies (`across: 'devices'`, `device`) are the catch-up lane while they do.
+
+`retrieveFromVault({ across: 'devices', device })` reads the copy one named device holds (ids from `listVaultBackups().otherDevices`), so a per-device label such as a manifest can be read from every sibling, not only the newest.
+
 ### CAL §4.2.1 — keys come from the Vault, not the backup _(2.4.0+)_
 
 A `BackupPayload` carries **data only**. It does not — and should not — carry the user's cryptographic keys: their identity lives in their Flowsta Vault, and your app never holds the key material.
