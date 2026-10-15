@@ -1906,6 +1906,10 @@ export interface AuthenticateWithVaultOptions {
    *  matters: the dialog shows the address that will be shared and the user
    *  decides. Scopes your app is not registered for are ignored. _(3.2.0)_ */
   scopes?: string[];
+  /** The install key your app linked with (`localAgentPubKey` of `linkFlowstaIdentity`).
+   *  A Vault (1.6.1+) signs silently for a remembered NON-browser origin only when
+   *  this matches the link; without it the dialog shows. Browsers need not send it. _(3.9.0)_ */
+  localAgentPubKey?: string;
 }
 
 /**
@@ -1967,6 +1971,7 @@ export async function authenticateWithVault(
         app_name: options.appName || 'Sign in with Flowsta',
         challenge: challengeB64,
         reason: options.reason || 'Sign in',
+        app_agent_pub_key: options.localAgentPubKey,
         ...(options.clientId ? { client_id: options.clientId, scopes: options.scopes || [] } : {}),
       }),
     });
@@ -2717,6 +2722,8 @@ export interface OpenWebSignedInOptions {
   appName?: string;
   /** Opens the finished URL in the OS browser; a Tauri app passes its opener. Omitted = the URL is only returned. */
   openUrl?: (url: string) => void | Promise<void>;
+  /** The install key your app linked with; lets a remembered app's Vault sign silently (see `AuthenticateWithVaultOptions`). */
+  localAgentPubKey?: string;
 }
 
 export interface OpenWebSignedInResult {
@@ -2771,6 +2778,7 @@ export async function openWebSignedIn(options: OpenWebSignedInOptions): Promise<
     ipcUrl: options.ipcUrl,
     appName: options.appName,
     reason: 'Open the web app signed in',
+    app_agent_pub_key: options.localAgentPubKey,
     clientId: options.clientId,
     scopes,
   });
