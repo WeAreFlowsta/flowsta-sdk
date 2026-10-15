@@ -2808,7 +2808,7 @@ export async function openWebSignedIn(options: OpenWebSignedInOptions): Promise<
     throw new FlowstaHolochainError(data.error_description || `Flowsta could not authorise the web app (${data.error || auth.status})`, data.error || 'authorize_failed');
   }
   const body = (await auth.json()) as { redirect_url?: string };
-  const fragment = `#v=${encodeURIComponent(verifier)}&s=${encodeURIComponent(state)}`;
+  const fragment = `#v=${encodeURIComponent(verifier)}&s=${encodeURIComponent(state)}&a=${encodeURIComponent(signed.agentPubKey)}`;
   let url: string;
   let consentRequired = false;
   if (body.redirect_url) {

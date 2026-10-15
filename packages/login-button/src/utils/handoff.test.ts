@@ -7,6 +7,9 @@ describe('parseHandoffFragment', () => {
   it('reads the verifier and state from the fragment', () => {
     expect(parseHandoffFragment(`#v=${v}&s=${s}`)).toEqual({ verifier: v, state: s });
     expect(parseHandoffFragment(`v=${v}&s=${s}`)).toEqual({ verifier: v, state: s });
+    const key = 'uhCAk75qJ5oobyfm3Lh-akZIQSe2zpSTtG1Pcxs23qTFoQwY_GDWY';
+    expect(parseHandoffFragment(`#v=${v}&s=${s}&a=${key}`)).toEqual({ verifier: v, state: s, agentPubKey: key });
+    expect(parseHandoffFragment(`#v=${v}&s=${s}&a=notakey`)).toEqual({ verifier: v, state: s });
   });
   it('is null for anything else', () => {
     expect(parseHandoffFragment('')).toBeNull();

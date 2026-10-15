@@ -12,7 +12,12 @@ import { storeState } from './state.js';
 export interface HandoffFragment {
   verifier: string;
   state: string;
+  /** The identity's agent key the desktop app signed in with (optional). */
+  agentPubKey?: string;
 }
+
+/** sessionStorage key for the agent key a hand-off carried, for the site to read after its code exchange. */
+export const HANDOFF_AGENT_KEY = 'flowsta_handoff_agent_pub_key';
 
 /** The hand-off fields of a URL fragment (`#v=…&s=…`), or null. Pure. */
 export function parseHandoffFragment(hash: string): HandoffFragment | null {
@@ -23,7 +28,9 @@ export function parseHandoffFragment(hash: string): HandoffFragment | null {
   const state = params.get('s');
   if (!verifier || !state) return null;
   if (!/^[A-Za-z0-9._~-]{32,128}$/.test(verifier) || !/^[A-Za-z0-9._~-]{16,128}$/.test(state)) return null;
-  return { verifier, state };
+  const agent = params.get('a');
+  const agentPubKey = agent && /^u[A-Za-z0-9+/=_-]{40,80}$/.test(agent) ? agent : undefined;
+  return agentPubKey ? { verifier, state, agentPubKey } : { verifier, state };
 }
 
 /**
@@ -37,6 +44,12 @@ export function adoptHandoffFragment(): boolean {
   if (!found) return false;
   storeCodeVerifier(found.verifier, found.state);
   storeState(found.state);
+  try {
+    if (found.agentPubKey) sessionStorage.setItem(HANDOFF_AGENT_KEY, found.agentPubKey);
+    else sessionStorage.removeItem(HANDOFF_AGENT_KEY);
+  } catch {
+    /* no storage */
+  }
   try {
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   } catch {

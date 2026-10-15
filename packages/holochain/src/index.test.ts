@@ -880,6 +880,7 @@ describe('openWebSignedIn', () => {
     const frag = new URLSearchParams(u.hash.slice(1));
     expect(frag.get('v')).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(frag.get('s')).toBe(u.searchParams.get('state'));
+    expect(frag.get('a')).toBe(b64url(KEY_A));
   });
 
   it('sends the person to the consent page once when the API asks, with the same PKCE pair', async () => {
