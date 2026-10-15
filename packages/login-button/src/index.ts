@@ -10,6 +10,7 @@
 export * from './utils/pkce.js';
 export * from './utils/state.js';
 export * from './utils/oauth.js';
+export * from './utils/handoff.js';
 
 // Export types
 export * from './types.js';

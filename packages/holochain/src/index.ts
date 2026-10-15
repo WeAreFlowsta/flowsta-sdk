@@ -2699,3 +2699,128 @@ function startAutoBackupLegacy(config: FlowstaAutoBackupConfig): () => void {
     }
   };
 }
+
+// ── Desktop-to-web hand-off ─────────────────────────────────────────────────
+
+export interface OpenWebSignedInOptions {
+  /** The WEB app's client id (dev portal) - the desktop app's declared companion. */
+  clientId: string;
+  /** One of the web app's registered redirect URIs (exact match). */
+  redirectUri: string;
+  /** Scopes to grant the web app (default: openid + display_name). */
+  scopes?: string[];
+  /** The Flowsta auth API (default https://auth-api.flowsta.com). */
+  apiUrl?: string;
+  /** Vault loopback URL override (tests). */
+  ipcUrl?: string;
+  /** Shown in the Vault's dialog if its trust setting asks. */
+  appName?: string;
+  /** Opens the finished URL in the OS browser; a Tauri app passes its opener. Omitted = the URL is only returned. */
+  openUrl?: (url: string) => void | Promise<void>;
+}
+
+export interface OpenWebSignedInResult {
+  /** The web app's callback URL with the code, the state and (in the fragment, never sent to a server) the PKCE verifier. */
+  url: string;
+  /** True when the API wants the person to see the consent page once (a client not yet authorised, not first-party): `url` is then the consent page. */
+  consentRequired: boolean;
+}
+
+function base64UrlOf(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function pkcePair(): Promise<{ verifier: string; challenge: string }> {
+  const raw = new Uint8Array(32);
+  crypto.getRandomValues(raw);
+  const verifier = base64UrlOf(raw);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  return { verifier, challenge: base64UrlOf(digest) };
+}
+
+/**
+ * Open the app's WEB app signed in as the identity this (linked) desktop app
+ * already holds - without the browser ever reaching the Vault.
+ *
+ * The four calls are the API's existing web sign-in, made from the desktop
+ * app instead of a page: a challenge for the web client; the Vault signs it
+ * over loopback (a linked app may sign for its companion web client - silently
+ * when its trust setting allows); the API's session token; then the OAuth
+ * authorize step as a Bearer, which hands back the web app's callback URL
+ * carrying the code. The PKCE verifier and the state ride in the URL FRAGMENT,
+ * which never reaches a server or a Referer; the web app's callback page
+ * (`@flowsta/login-button` `handleCallback`) adopts them and runs its normal
+ * code exchange. One click, one sign-in, no second Vault dialog, no code to type.
+ */
+export async function openWebSignedIn(options: OpenWebSignedInOptions): Promise<OpenWebSignedInResult> {
+  const api = (options.apiUrl || 'https://auth-api.flowsta.com').replace(/\/$/, '');
+  const scopes = options.scopes && options.scopes.length ? options.scopes : ['openid', 'display_name'];
+  // 1. A challenge for the WEB client.
+  const ch = await fetch(`${api}/auth/vault/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: options.clientId }),
+  });
+  if (!ch.ok) throw new FlowstaHolochainError(`Flowsta could not start the sign-in (${ch.status})`, 'challenge_failed');
+  const { challenge } = (await ch.json()) as { challenge: string };
+  if (!challenge) throw new FlowstaHolochainError('Flowsta sent no challenge', 'challenge_failed');
+  // 2. The Vault signs it (the linked app's own loopback call).
+  const signed = await authenticateWithVault(challenge, {
+    ipcUrl: options.ipcUrl,
+    appName: options.appName,
+    reason: 'Open the web app signed in',
+    clientId: options.clientId,
+    scopes,
+  });
+  // 3. The API's session, from the signature.
+  const tok = await fetch(`${api}/auth/vault/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challenge, agent_pub_key: signed.agentPubKey, signature: signed.signature, did: signed.did }),
+  });
+  if (!tok.ok) {
+    const data = await tok.json().catch(() => ({}));
+    throw new FlowstaHolochainError(data.description || `Flowsta refused the sign-in (${data.error || tok.status})`, data.error || 'token_failed', data.description);
+  }
+  const { token } = (await tok.json()) as { token?: string };
+  if (!token) throw new FlowstaHolochainError('Flowsta sent no session', 'token_failed');
+  // 4. The OAuth code for the web client, as the signed-in person.
+  const { verifier, challenge: codeChallenge } = await pkcePair();
+  const stateBytes = new Uint8Array(24);
+  crypto.getRandomValues(stateBytes);
+  const state = base64UrlOf(stateBytes);
+  const q = new URLSearchParams({
+    client_id: options.clientId,
+    redirect_uri: options.redirectUri,
+    response_type: 'code',
+    scope: scopes.join(' '),
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  });
+  const auth = await fetch(`${api}/oauth/authorize?${q.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!auth.ok) {
+    const data = await auth.json().catch(() => ({}));
+    throw new FlowstaHolochainError(data.error_description || `Flowsta could not authorise the web app (${data.error || auth.status})`, data.error || 'authorize_failed');
+  }
+  const body = (await auth.json()) as { redirect_url?: string };
+  const fragment = `#v=${encodeURIComponent(verifier)}&s=${encodeURIComponent(state)}`;
+  let url: string;
+  let consentRequired = false;
+  if (body.redirect_url) {
+    url = body.redirect_url + fragment;
+  } else {
+    // The API wants the consent page once: send the person there through the
+    // normal login page, with the same PKCE pair so the callback still works.
+    consentRequired = true;
+    const login = new URL('https://login.flowsta.com/login');
+    for (const [k, v] of q) login.searchParams.set(k, v);
+    url = login.toString() + fragment;
+  }
+  if (options.openUrl) await options.openUrl(url);
+  return { url, consentRequired };
+}

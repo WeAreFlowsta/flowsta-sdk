@@ -1,5 +1,11 @@
 # Changelog
 
+
+## [3.9.0] - 2026-10-15
+
+### Added
+- `openWebSignedIn({ clientId, redirectUri, scopes?, apiUrl?, openUrl? })` - the desktop-to-web hand-off. A desktop app that already holds the person's identity through the Flowsta Vault opens its companion web app signed in: the API's challenge for the web client, signed by the Vault over loopback (a linked app may sign for its own or its declared companion client - Vault 1.6.1+), the API's session, then the OAuth authorize step as a Bearer. Returns the web app's callback URL with the code, and the PKCE verifier and state in the URL fragment, which never reaches a server. The browser never has to find the Vault. `consentRequired` is true when the API wants the consent page seen once (a client not yet authorised): the URL is then the login page with the same PKCE pair.
+
 ## 3.8.0
 
 Additive. Pairs with Flowsta Vault 1.6.1; older Vaults answer the new call with "not available" and ignore the new option.

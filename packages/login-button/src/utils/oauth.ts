@@ -2,6 +2,7 @@
  * OAuth 2.0 utilities for Flowsta authentication
  */
 
+import { adoptHandoffFragment } from './handoff.js';
 import { generatePKCEPair, storeCodeVerifier } from './pkce.js';
 import { generateState, storeState } from './state.js';
 
@@ -98,6 +99,10 @@ export function handleCallback(): {
   error?: string;
   errorDescription?: string;
 } {
+  // A desktop app may have opened this page signed in (the hand-off): its
+  // verifier and state ride in the fragment and are adopted first, so the
+  // rest of the callback is the same as after a click on the button.
+  adoptHandoffFragment();
   return parseCallbackUrl(window.location.href);
 }
 

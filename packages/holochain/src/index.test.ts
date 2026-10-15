@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   agentKeysMatch,
   authenticateWithVault,
+  openWebSignedIn,
   backupToVault,
   getVaultStatus,
   onIdentityChanged,
@@ -822,5 +823,82 @@ describe("retrieveFromVault({ across: 'devices', device })", () => {
     });
     await retrieveFromVault({ clientId: 'c', label: 'manifest', device: 'dev-b', ipcUrl: IPC });
     expect('device' in sent).toBe(false);
+  });
+});
+
+// ── openWebSignedIn (the desktop-to-web hand-off) ────────────────────────────
+
+describe('openWebSignedIn', () => {
+  const API = 'https://api.test';
+  const challenge = 'flowsta-auth-challenge:v1:n0nce:web_app';
+  const routes = (authorize: (url: string) => Response) => (url: string, init?: RequestInit): Response | null => {
+    if (url === `${API}/auth/vault/challenge`) {
+      expect(JSON.parse(String(init?.body)).client_id).toBe('web_app');
+      return json(200, { challenge, expires_in: 300 });
+    }
+    if (url === `${IPC}/status`) return json(200, { running: true, unlocked: true, initialized: true, agent_pub_key: b64url(KEY_A) });
+    if (url === `${IPC}/authenticate`) {
+      const body = JSON.parse(String(init?.body));
+      expect(atob(body.challenge)).toBe(challenge);
+      expect(body.client_id).toBe('web_app');
+      return json(200, { success: true, did: 'did:flowsta:x', agent_pub_key: b64url(KEY_A), signature: 'c2ln', signed_at: 'now' });
+    }
+    if (url === `${API}/auth/vault/token`) {
+      const body = JSON.parse(String(init?.body));
+      expect(body.challenge).toBe(challenge);
+      expect(body.signature).toBe('c2ln');
+      return json(200, { token: 'session-jwt' });
+    }
+    if (url.startsWith(`${API}/oauth/authorize?`)) {
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer session-jwt');
+      const q = new URL(url).searchParams;
+      expect(q.get('client_id')).toBe('web_app');
+      expect(q.get('redirect_uri')).toBe('https://web.test/auth/callback/');
+      expect(q.get('code_challenge_method')).toBe('S256');
+      expect(q.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      return authorize(url);
+    }
+    return null;
+  };
+
+  it('runs the four calls and hands back the callback URL with the verifier in the fragment', async () => {
+    // The API echoes the state in the callback URL, as the real one does.
+    mockFetch(routes((url) => json(200, { redirect_url: 'https://web.test/auth/callback/?code=abc&state=' + new URL(url).searchParams.get('state') })));
+    const opened: string[] = [];
+    const result = await openWebSignedIn({
+      clientId: 'web_app',
+      redirectUri: 'https://web.test/auth/callback/',
+      apiUrl: API,
+      ipcUrl: IPC,
+      openUrl: (u) => { opened.push(u); },
+    });
+    expect(result.consentRequired).toBe(false);
+    expect(opened).toEqual([result.url]);
+    const u = new URL(result.url);
+    expect(u.origin + u.pathname).toBe('https://web.test/auth/callback/');
+    expect(u.searchParams.get('code')).toBe('abc');
+    const frag = new URLSearchParams(u.hash.slice(1));
+    expect(frag.get('v')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(frag.get('s')).toBe(u.searchParams.get('state'));
+  });
+
+  it('sends the person to the consent page once when the API asks, with the same PKCE pair', async () => {
+    mockFetch(routes(() => json(200, { app: { name: 'Web' }, scopes: ['openid'] })));
+    const result = await openWebSignedIn({ clientId: 'web_app', redirectUri: 'https://web.test/auth/callback/', apiUrl: API, ipcUrl: IPC });
+    expect(result.consentRequired).toBe(true);
+    const u = new URL(result.url);
+    expect(u.origin + u.pathname).toBe('https://login.flowsta.com/login');
+    expect(u.searchParams.get('code_challenge')).toBeTruthy();
+    expect(new URLSearchParams(u.hash.slice(1)).get('v')).toBeTruthy();
+  });
+
+  it('refuses when the Vault will not sign for that client', async () => {
+    mockFetch((url) => {
+      if (url === `${API}/auth/vault/challenge`) return json(200, { challenge });
+      if (url === `${IPC}/status`) return json(200, { running: true, unlocked: true, initialized: true });
+      if (url === `${IPC}/authenticate`) return json(400, { error: 'reserved_prefix' });
+      return null;
+    });
+    await expect(openWebSignedIn({ clientId: 'other', redirectUri: 'https://web.test/cb', apiUrl: API, ipcUrl: IPC })).rejects.toMatchObject({ code: 'reserved_prefix' });
   });
 });
