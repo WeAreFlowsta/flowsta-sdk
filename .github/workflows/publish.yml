@@ -39,8 +39,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing (OIDC): npm 11.5.1+ exchanges this job's GitHub
+      # identity for a short-lived publish credential, so there is no npm
+      # token in this repo at all. Each package names this repo + workflow as
+      # its trusted publisher on npmjs.com (Settings -> Trusted publisher).
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest && npm --version
       
       - name: Install dependencies
         run: npm install
@@ -78,8 +85,6 @@ jobs:
           git push --follow-tags
       
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ "${{ github.event.inputs.package }}" = "all" ]; then
             echo "Publishing all packages..."
