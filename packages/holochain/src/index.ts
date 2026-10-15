@@ -2778,7 +2778,7 @@ export async function openWebSignedIn(options: OpenWebSignedInOptions): Promise<
     ipcUrl: options.ipcUrl,
     appName: options.appName,
     reason: 'Open the web app signed in',
-    app_agent_pub_key: options.localAgentPubKey,
+    localAgentPubKey: options.localAgentPubKey,
     clientId: options.clientId,
     scopes,
   });
