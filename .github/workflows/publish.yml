@@ -42,10 +42,12 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing (OIDC): npm 11.5.1+ exchanges this job's GitHub
-      # identity for a short-lived publish credential, so there is no npm
-      # token in this repo at all. Each package names this repo + workflow as
-      # its trusted publisher on npmjs.com (Settings -> Trusted publisher).
+      # Trusted publishing (OIDC): npm exchanges this job's GitHub identity
+      # for a short-lived credential, so there is no npm token in this repo.
+      # Each package names this repo + workflow as its trusted publisher on
+      # npmjs.com. The publisher is stage-only (npm's recommended setting):
+      # this job uploads the version as a staged publish, and it goes public
+      # when a maintainer approves it on npmjs.com with 2FA.
       - name: Use an npm that supports trusted publishing
         run: npm install -g npm@latest && npm --version
       
@@ -88,13 +90,13 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.package }}" = "all" ]; then
             echo "Publishing all packages..."
-            cd packages/auth && npm publish --provenance --access public && cd ../..
-            cd packages/login-button && npm publish --provenance --access public && cd ../..
-            cd packages/holochain && npm publish --provenance --access public && cd ../..
+            cd packages/auth && npm stage publish --provenance --access public && cd ../..
+            cd packages/login-button && npm stage publish --provenance --access public && cd ../..
+            cd packages/holochain && npm stage publish --provenance --access public && cd ../..
           else
             echo "Publishing ${{ github.event.inputs.package }}..."
             cd packages/${{ github.event.inputs.package }}
-            npm publish --provenance --access public
+            npm stage publish --provenance --access public
             cd ../..
           fi
       
