@@ -226,7 +226,7 @@ const { secretHex, source } = await getAppNetworkSecret({ clientId, appName: 'My
 
 `getAppNetworkSecret` never changes a secret an identity already has: it reads a backup under the label on this device, then on any other device, then asks the Vault for the derived secret (`getAppSecret`, Vault 1.6.1+ - the same on every device, nothing to copy or wait for), and only then makes a random one and writes it to this device's backup slot for the others to find. Needs the Vault unlocked.
 
-The five rules that make the rest work, learned building Your Own AI on it:
+The five rules that make the rest work, learned building Flowsta's own apps on it:
 
 1. **Every device has its own agent key** on that network. Never the same key on two conductors - gossip fails silently.
 2. **List at a founding anchor.** The first device's agent key (or any fixed hash) is the address every device links and reads at; the private half is never needed for an address, so losing the first device loses nothing.
@@ -379,7 +379,7 @@ Also in 3.5.0 (pairs with Vault 1.5.0, harmless before): `resolveVaultUrl` ranks
 
 ### `partitionKeyFor(agentPubKey)` _(3.3.0)_
 
-The key the Flowsta apps use to keep one identity's data apart from another's: the first 16 hex characters of SHA-256 over the agent key's 39 raw bytes. It is the same for the base64url and base58 spellings of a key, and the same key the Flowsta Vault, ProofPoll and Your Own AI use for their own per-identity folders. Resolves to `null` when the string is not an agent key.
+The key the Flowsta apps use to keep one identity's data apart from another's: the first 16 hex characters of SHA-256 over the agent key's 39 raw bytes. It is the same for the base64url and base58 spellings of a key, and the same key the Flowsta Vault and ProofPoll use for their own per-identity folders. Resolves to `null` when the string is not an agent key.
 
 Use it when your app keeps data for more than one Flowsta identity on the same device or origin - an IndexedDB database, a folder, a key prefix - so the storage is named after the identity without the agent key itself appearing in a name. `getBoundIdentity()` is one slot per origin (the identity the app operates under now, overwritten by the next `linkFlowstaIdentity`), so treat it as the pointer to the active partition, not as a history.
 

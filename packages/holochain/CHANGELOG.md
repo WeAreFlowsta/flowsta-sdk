@@ -1,12 +1,16 @@
 # Changelog
 
 
+## [3.10.1] - 2026-10-19
+
+README and comments only: the package's documentation is written for third-party developers and no longer names Flowsta's other products as examples. No code change from 3.10.0.
+
 ## [3.10.0] - 2026-10-19
 
 Additive. Needs no Vault change.
 
 ### Added
-- `keepRegistered({ adminWebsocket, servers, intervalMs?, firstDelayMs?, log? })` - keeps this device's agents listed on the bootstrap server(s) you name and hands the conductor listed peers it has not heard of, once a minute, when the conductor's own registration has stalled. Why: in Holochain 0.6 (kitsune2 0.4.x) a device that is awake and cut off for more than 3 minutes across a note re-sign is never listed again until the conductor restarts, and a request caught by a sleep never times out. Measured 2026-10-19; what Flowsta Vault and Your Own AI ship. Works with any bootstrap server: Holochain's, your own, or Flowsta's for a registered app.
+- `keepRegistered({ adminWebsocket, servers, intervalMs?, firstDelayMs?, log? })` - keeps this device's agents listed on the bootstrap server(s) you name and hands the conductor listed peers it has not heard of, once a minute, when the conductor's own registration has stalled. Why: in Holochain 0.6 (kitsune2 0.4.x) a device that is awake and cut off for more than 3 minutes across a note re-sign is never listed again until the conductor restarts, and a request caught by a sleep never times out. Measured 2026-10-19; what Flowsta's own apps ship. Works with any bootstrap server: Holochain's, your own, or Flowsta's for a registered app.
 - `parseRendezvousNote`, `rendezvousIdCore`, `notesToRegister`, `notesToFeed` - the pieces, exported for apps that want their own loop.
 
 ### Documented
@@ -68,7 +72,7 @@ Additive. Groundwork for Vault 1.5.0 (the identity switcher); works with every 1
 
 Additive.
 
-- `partitionKeyFor(agentPubKey)` - the folder-safe key the Flowsta apps use to keep one identity's data apart from another's (first 16 hex chars of SHA-256 over the agent key's 39 raw bytes; the same for the base64url and base58 spellings, and the same key the Vault, ProofPoll and Your Own AI use for their own per-identity folders). `PARTITION_KEY_LENGTH` exported. Use it to name per-identity storage instead of writing the agent key into a name.
+- `partitionKeyFor(agentPubKey)` - the folder-safe key the Flowsta apps use to keep one identity's data apart from another's (first 16 hex chars of SHA-256 over the agent key's 39 raw bytes; the same for the base64url and base58 spellings, and the same key the Vault and ProofPoll use for their own per-identity folders). `PARTITION_KEY_LENGTH` exported. Use it to name per-identity storage instead of writing the agent key into a name.
 - `getBoundIdentity()` is documented as what it always was: one slot per origin, the identity the app operates under now, overwritten by the next `linkFlowstaIdentity`. Apps holding data for several identities key that data by `partitionKeyFor` and treat the binding as the pointer to the active one.
 - The `expected_identity` comment in `backupToVault` no longer calls the Vault's gate forward-compatible: the Vault (1.3.0+) refuses a write under a different active identity server-side.
 

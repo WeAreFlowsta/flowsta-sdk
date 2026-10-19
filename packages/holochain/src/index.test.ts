@@ -395,7 +395,7 @@ describe('authenticateWithVault under a browser block', () => {
 // ── partitionKeyFor ────────────────────────────────────────────────
 
 describe('partitionKeyFor', () => {
-  // Vectors shared with the Vault's, ProofPoll's and Your Own AI's Rust
+  // Vectors shared with the Vault's and ProofPoll's Rust
   // tests: sha256 over the 39 decoded bytes, first 16 hex chars.
   const A64 = 'uhCAk75qJ5oobyfm3Lh-akZIQSe2zpSTtG1Pcxs23qTFoQwY_GDWY';
   const A58 = 'u2VGYeS8PwMUycfXur26JPUyLQvmcGpc7abupp5SHFNnrw4o5ySvKUT';

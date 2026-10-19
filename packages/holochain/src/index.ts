@@ -362,8 +362,8 @@ export const PARTITION_KEY_LENGTH = 16;
  * The folder-safe key the Flowsta apps use to keep one identity's data apart
  * from another's: the first 16 hex characters of SHA-256 over the agent
  * key's 39 raw bytes. Identical for the base64url and base58 spellings of
- * the same key, and identical to the key the Flowsta Vault, ProofPoll and
- * Your Own AI use for their own per-identity folders - so an app can name
+ * the same key, and identical to the key the Flowsta Vault and ProofPoll
+ * use for their own per-identity folders - so an app can name
  * its storage (an IndexedDB database, a folder, a key prefix) after the
  * identity without ever writing the agent key itself into a name.
  *
@@ -2846,7 +2846,7 @@ export async function openWebSignedIn(options: OpenWebSignedInOptions): Promise<
 // refuses notes older than 3 min. So a device that is awake and cut off for
 // more than 3 min across a re-sign is never listed again until the conductor
 // restarts - and a request caught by a sleep never times out. Measured and
-// written up 2026-10-19 while building Your Own AI's multi-device sync.
+// written up 2026-10-19 while building multi-device sync into Flowsta's apps.
 //
 // `keepRegistered` is the gentler cure, the one Flowsta's apps ship: once a
 // minute, read the conductor's own fresh notes over the admin port, PUT the
