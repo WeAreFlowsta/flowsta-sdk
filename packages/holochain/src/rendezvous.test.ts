@@ -134,7 +134,7 @@ describe('keepRegistered', () => {
     });
 
     const first = await keeper.runOnce();
-    expect(first).toEqual({ registered: 2, fed: 1, reached: 1, conductorRegistered: 0 });
+    expect(first).toEqual({ registered: 2, registeredBlind: 0, fed: 1, reached: 1, conductorRegistered: 0 });
     const auth = calls.find((c) => c.url.endsWith('/authenticate'));
     expect(auth?.method).toBe('PUT');
     expect(new TextDecoder().decode(auth?.body as Uint8Array)).toBe('material');
@@ -148,7 +148,7 @@ describe('keepRegistered', () => {
     // Listed now, and the peer is known: a quiet round.
     const { ws: ws2 } = admin(own, [peer]);
     const quiet = keepRegistered({ adminWebsocket: ws2, servers: [{ url: 'https://boot.example', authMaterialBase64: btoa('material') }], intervalMs: 0, fetch: fetchMock as unknown as typeof fetch, nowUs: () => NOW_US });
-    expect(await quiet.runOnce()).toEqual({ registered: 0, fed: 0, reached: 1, conductorRegistered: 2 });
+    expect(await quiet.runOnce()).toEqual({ registered: 0, registeredBlind: 0, fed: 0, reached: 1, conductorRegistered: 2 });
     keeper.stop();
   });
 
@@ -169,6 +169,28 @@ describe('keepRegistered', () => {
     expect(back.reached).toBe(1);
     expect(back.registered).toBe(1);
     expect(lines[1]).toBe('[rendezvous] a rendezvous answers again');
+  });
+
+  it('registers each note once, and treats a full listing as no sign of a stall', async () => {
+    const own = [note(space, agentA, ageS(60))];
+    const { ws } = admin(own);
+    let puts = 0;
+    const lines: string[] = [];
+    // A server that never lists us (as a crowded network would after evicting our note), 32 others listed.
+    const crowd = Array.from({ length: 32 }, (_, i) => JSON.parse(note(space, rendezvousIdCore(holoHash(100 + i)), ageS(100)).raw));
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') { puts++; return new Response('', { status: 200 }); }
+      return new Response(JSON.stringify(crowd), { status: 200 });
+    });
+    const keeper = keepRegistered({ adminWebsocket: ws, servers: [{ url: 'https://open.example' }], intervalMs: 0, fetch: fetchMock as unknown as typeof fetch, nowUs: () => NOW_US, log: (l) => lines.push(l) });
+    const first = await keeper.runOnce();
+    expect(first.registeredBlind).toBe(1);
+    expect(first.registered).toBe(0);
+    expect(puts).toBe(1);
+    await keeper.runOnce();
+    await keeper.runOnce();
+    expect(puts).toBe(1);
+    expect(lines.some((l) => /ourselves/.test(l))).toBe(false);
   });
 
   it('does nothing without a timer and stops cleanly', () => {

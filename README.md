@@ -13,7 +13,7 @@ Official JavaScript SDK for Flowsta Authentication - Zero-knowledge, OAuth-based
 |---------|---------|-------------|
 | **[@flowsta/auth](./packages/auth)** ⭐ | `2.5.1` | Core OAuth SDK + Sign It (file signing & verification) |
 | **[@flowsta/login-button](./packages/login-button)** | `0.1.6` | Pre-built button components |
-| **[@flowsta/holochain](./packages/holochain)** | `3.10.1` | Vault agent linking, backups + reinstall recovery, Sign It document signing (published from the Vault, v3.6.0), identity binding, relay login, the user's email when they allow it in the Vault (v3.2.0, Vault 1.3.0+), identity-switch awareness for Vault 1.5.0 (v3.5.0), backups read across the person's devices for Vault 1.6.0 (v3.7.0), one private network per app on every device (v3.8.0), the desktop-to-web hand-off (v3.9.0), and `keepRegistered` to keep a device listed on its bootstrap (v3.10.x). v3 is a breaking release - see [Migrating to v3](./packages/holochain/README.md#migrating-to-v3) |
+| **[@flowsta/holochain](./packages/holochain)** | `3.10.2` | Vault agent linking, backups + reinstall recovery, Sign It document signing (published from the Vault, v3.6.0), identity binding, relay login, the user's email when they allow it in the Vault (v3.2.0, Vault 1.3.0+), identity-switch awareness for Vault 1.5.0 (v3.5.0), backups read across the person's devices for Vault 1.6.0 (v3.7.0), one private network per app on every device (v3.8.0), the desktop-to-web hand-off (v3.9.0), and `keepRegistered` to keep a device listed on its bootstrap (v3.10.x). v3 is a breaking release - see [Migrating to v3](./packages/holochain/README.md#migrating-to-v3) |
 
 ## 🚀 Getting Started
 

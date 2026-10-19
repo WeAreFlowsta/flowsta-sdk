@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [3.10.2] - 2026-10-19
+
+### Fixed
+- `keepRegistered` registers each note once (as the conductor itself does) instead of every round until the server lists it, and treats a listing at the server's cap (32 notes per network, `RENDEZVOUS_LISTING_CAP`) as no evidence of a stall: in a network with more agents than that, a note is simply evicted. 3.10.0 and 3.10.1 re-registered every minute in such a network and reported a stall. `RendezvousRound.registeredBlind` counts those registrations.
+
 ## [3.10.1] - 2026-10-19
 
 README and comments only: the package's documentation is written for third-party developers and no longer names Flowsta's other products as examples. No code change from 3.10.0.

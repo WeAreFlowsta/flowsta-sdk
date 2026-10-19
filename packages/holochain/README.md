@@ -259,7 +259,7 @@ const keeper = keepRegistered({
 // on shutdown: keeper.stop()
 ```
 
-Once a minute it reads the conductor's own fresh notes over the admin port, PUTs the ones a server lacks (notes 45 s to 170 s old: old enough that the conductor has plainly not sent them, young enough to be accepted), and hands the conductor listed peers it has not heard of (`addAgentInfo`) - against every server you name, so a second server is a line in a list. It writes a line only when the picture changes: the first time it stepped in, when the conductor registers again, when no server answers. `intervalMs: 0` gives you `runOnce()` for your own loop; `parseRendezvousNote`, `rendezvousIdCore`, `notesToRegister` and `notesToFeed` are exported too.
+Once a minute it reads the conductor's own fresh notes over the admin port, PUTs the ones a server lacks (notes 45 s to 170 s old: old enough that the conductor has plainly not sent them, young enough to be accepted), and hands the conductor listed peers it has not heard of (`addAgentInfo`) - against every server you name, so a second server is a line in a list. Each note is registered at most once (the conductor's own rate), and a listing at the server's cap of 32 notes per network (`RENDEZVOUS_LISTING_CAP`) is not read as a stall - in a network with more agents than that a note is simply evicted. It writes a line only when the picture changes: the first time it stepped in, when the conductor registers again, when no server answers. `intervalMs: 0` gives you `runOnce()` for your own loop; `parseRendezvousNote`, `rendezvousIdCore`, `notesToRegister` and `notesToFeed` are exported too.
 
 ### CAL §4.2.1 — keys come from the Vault, not the backup _(2.4.0+)_
 

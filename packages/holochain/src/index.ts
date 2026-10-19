@@ -2890,6 +2890,16 @@ export function rendezvousIdCore(hash: Uint8Array): string {
 const REGISTER_MIN_AGE_US = 45_000_000;
 /** The server refuses anything older than 3 min. */
 const REGISTER_MAX_AGE_US = 170_000_000;
+/** A note lives this long; what we registered longer ago can be forgotten. */
+const NOTE_LIFETIME_US = 1_200_000_000;
+/**
+ * kitsune2-bootstrap-srv keeps at most this many notes per network and evicts
+ * one when a new one arrives. In a network with more agents than this, a note
+ * missing from the listing says nothing about the conductor: it may simply
+ * have been evicted. Registering is still right - once per note, as the
+ * conductor itself would - but it is no sign of a stall.
+ */
+export const RENDEZVOUS_LISTING_CAP = 32;
 
 /**
  * Our own notes the server should have and does not: fresh enough to be
@@ -2940,8 +2950,10 @@ export interface AdminWebsocketForRendezvous {
 
 /** What one round did. */
 export interface RendezvousRound {
-  /** Our notes we registered ourselves. */
+  /** Our notes we registered ourselves in a network whose listing we could trust. */
   registered: number;
+  /** Our notes we registered in a network whose listing was full (the cap): needed or not, no one can tell. */
+  registeredBlind: number;
   /** Other devices' notes we handed the conductor. */
   fed: number;
   /** Servers that answered. */
@@ -2993,6 +3005,8 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
   const nowUs = config.nowUs ?? (() => Date.now() * 1000);
   const log = config.log ?? (() => {});
   const tokens = new Map<string, string>();
+  /** Notes we have registered, as `space/agent/createdAt`: each note once, as the conductor itself sends it. */
+  const registeredNotes = new Map<string, number>();
   let stalledSinceMs: number | null = null;
   let everyServerDark = false;
 
@@ -3053,7 +3067,7 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
         }
       }
     }
-    const round: RendezvousRound = { registered: 0, fed: 0, reached: 0, conductorRegistered: 0 };
+    const round: RendezvousRound = { registered: 0, registeredBlind: 0, fed: 0, reached: 0, conductorRegistered: 0 };
     if (spaces.size === 0) return round;
     const notes = (await admin.agentInfo({ dna_hashes: null }))
       .map(parseRendezvousNote)
@@ -3061,6 +3075,7 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
     const own = notes.filter((n) => ownAgents.has(n.agent));
     const known = notes.filter((n) => !ownAgents.has(n.agent));
     const now = nowUs();
+    for (const [key, createdAt] of registeredNotes) if (now - createdAt >= NOTE_LIFETIME_US) registeredNotes.delete(key);
     const listings: RendezvousNote[] = [];
     const reached = new Set<string>();
     const registeredOn = new Set<string>();
@@ -3078,10 +3093,16 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
         round.conductorRegistered += ownHere.filter(
           (n) => now - n.createdAt <= REGISTER_MAX_AGE_US && listed.some((l) => l.agent === n.agent && l.createdAt >= n.createdAt),
         ).length;
+        const full = listed.length >= RENDEZVOUS_LISTING_CAP;
         for (const note of notesToRegister(ownHere, listed, now)) {
+          const key = `${note.space}/${note.agent}/${note.createdAt}`;
+          if (registeredNotes.has(key)) continue;
+          registeredNotes.set(key, note.createdAt);
           try {
             const r = await send(server, `/bootstrap/${note.space}/${note.agent}`, { method: 'PUT', body: note.raw });
-            if (r.ok) {
+            if (r.ok && full) {
+              round.registeredBlind++;
+            } else if (r.ok) {
               round.registered++;
               registeredOn.add(serverName);
             } else {
