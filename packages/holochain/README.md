@@ -236,6 +236,31 @@ The five rules that make the rest work, learned building Your Own AI on it:
 
 `retrieveFromVault({ across: 'devices', device })` reads the copy one named device holds (ids from `listVaultBackups().otherDevices`), so a per-device label such as a manifest can be read from every sibling, not only the newest.
 
+#### Where the devices meet: your conductor's bootstrap and relay
+
+The SDK supplies identity: the keys, the per-device keys, the private-network secret, the backups. **Where your app's devices find each other is your conductor's business**, not the SDK's: its `network:` config names a bootstrap server (the address book where devices on a network register and look each other up) and a relay (carries traffic between devices that cannot reach each other directly). Any kitsune2 bootstrap server works - Holochain's public one, [your own](https://github.com/holochain/kitsune2) (`kitsune2-bootstrap-srv`), or a community node. Your users' devices never join Flowsta's networks: those (identity, signing, the Vault's private records) run on `bootstrap.flowsta.com`, which checks a sign-in and only admits apps with auth material Flowsta issued. Using it for your own network is optional and comes with registering your app; nothing in the SDK needs it.
+
+#### 6. Keep the device listed _(3.10.0)_
+
+A sixth rule, learned the hard way: the conductor's networking (kitsune2 0.4.x) re-sends each agent's note to the bootstrap every 15 minutes, retries a refused send unchanged on a backoff that reaches 5 minutes, and the server refuses notes older than 3 minutes. A device that is awake and cut off for more than 3 minutes across a re-sign (Wi-Fi gone, server down) is never listed again until its conductor restarts; a request caught by a laptop sleep never times out. Sleep itself is harmless. Measured 2026-10-19. `keepRegistered` is the cure Flowsta's own apps ship - no restart:
+
+```typescript
+import { keepRegistered } from '@flowsta/holochain';
+
+// Once the conductor is up (any @holochain/client AdminWebsocket 0.20+):
+const keeper = keepRegistered({
+  adminWebsocket,
+  servers: [
+    { url: 'https://bootstrap.example.com' },                       // open
+    // { url: 'https://bootstrap.flowsta.com', authMaterialBase64 }, // sign-in gated
+  ],
+  log: (line) => console.info(line),
+});
+// on shutdown: keeper.stop()
+```
+
+Once a minute it reads the conductor's own fresh notes over the admin port, PUTs the ones a server lacks (notes 45 s to 170 s old: old enough that the conductor has plainly not sent them, young enough to be accepted), and hands the conductor listed peers it has not heard of (`addAgentInfo`) - against every server you name, so a second server is a line in a list. It writes a line only when the picture changes: the first time it stepped in, when the conductor registers again, when no server answers. `intervalMs: 0` gives you `runOnce()` for your own loop; `parseRendezvousNote`, `rendezvousIdCore`, `notesToRegister` and `notesToFeed` are exported too.
+
 ### CAL §4.2.1 — keys come from the Vault, not the backup _(2.4.0+)_
 
 A `BackupPayload` carries **data only**. It does not — and should not — carry the user's cryptographic keys: their identity lives in their Flowsta Vault, and your app never holds the key material.

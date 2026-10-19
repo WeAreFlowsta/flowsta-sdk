@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [3.10.0] - 2026-10-19
+
+Additive. Needs no Vault change.
+
+### Added
+- `keepRegistered({ adminWebsocket, servers, intervalMs?, firstDelayMs?, log? })` - keeps this device's agents listed on the bootstrap server(s) you name and hands the conductor listed peers it has not heard of, once a minute, when the conductor's own registration has stalled. Why: in Holochain 0.6 (kitsune2 0.4.x) a device that is awake and cut off for more than 3 minutes across a note re-sign is never listed again until the conductor restarts, and a request caught by a sleep never times out. Measured 2026-10-19; what Flowsta Vault and Your Own AI ship. Works with any bootstrap server: Holochain's, your own, or Flowsta's for a registered app.
+- `parseRendezvousNote`, `rendezvousIdCore`, `notesToRegister`, `notesToFeed` - the pieces, exported for apps that want their own loop.
+
+### Documented
+- Where a Holochain app's devices meet is the conductor's `network:` config, not the SDK: the README's multi-device section now says so, and what Flowsta's bootstrap is and is not.
+
 ## [3.9.0] - 2026-10-15
 
 ### Added

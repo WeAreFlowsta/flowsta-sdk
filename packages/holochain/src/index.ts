@@ -2832,3 +2832,320 @@ export async function openWebSignedIn(options: OpenWebSignedInOptions): Promise<
   if (options.openUrl) await options.openUrl(url);
   return { url, consentRequired };
 }
+
+// ── Keeping a device listed on the rendezvous ───────────────────────
+//
+// Where a Holochain app's devices meet is the conductor's business - its
+// `network:` config names a bootstrap server and a relay - and it is the
+// developer's choice: Holochain's public one, your own kitsune2-bootstrap-srv,
+// or Flowsta's for a registered app. The SDK supplies identity only.
+//
+// What this section fixes is in the conductor's networking (kitsune2 0.4.x,
+// Holochain 0.6): each agent's signed note is re-sent every 15 min; a refused
+// send is retried unchanged on a backoff that reaches 5 min, and the server
+// refuses notes older than 3 min. So a device that is awake and cut off for
+// more than 3 min across a re-sign is never listed again until the conductor
+// restarts - and a request caught by a sleep never times out. Measured and
+// written up 2026-10-19 while building Your Own AI's multi-device sync.
+//
+// `keepRegistered` is the gentler cure, the one Flowsta's apps ship: once a
+// minute, read the conductor's own fresh notes over the admin port, PUT the
+// ones the server lacks, and hand the conductor listed peers it has not
+// heard of - against every server you name.
+
+/** One signed agent note as the admin port and a bootstrap server both carry it. */
+export interface RendezvousNote {
+  /** The network, as the note names it (32-byte DNA hash core, base64url). */
+  space: string;
+  /** The agent, as the note names it (32-byte key core, base64url). */
+  agent: string;
+  /** Microseconds since the epoch. */
+  createdAt: number;
+  tombstone: boolean;
+  /** The string as received: what gets PUT and what `addAgentInfo` takes. */
+  raw: string;
+}
+
+/** Parse a note from the admin port (`agentInfo`) or a server listing. */
+export function parseRendezvousNote(raw: string): RendezvousNote | null {
+  try {
+    const outer = JSON.parse(raw) as { agentInfo?: unknown };
+    if (typeof outer.agentInfo !== 'string') return null;
+    const inner = JSON.parse(outer.agentInfo) as Record<string, unknown>;
+    const created = inner.createdAt;
+    const createdAt = typeof created === 'string' ? Number(created) : typeof created === 'number' ? created : NaN;
+    if (typeof inner.agent !== 'string' || typeof inner.space !== 'string' || !Number.isFinite(createdAt)) return null;
+    return { space: inner.space, agent: inner.agent, createdAt, tombstone: inner.isTombstone === true, raw };
+  } catch {
+    return null;
+  }
+}
+
+/** The 32-byte core of a 39-byte holo hash, encoded the way a note names its agent and space. */
+export function rendezvousIdCore(hash: Uint8Array): string {
+  return base64UrlOf(hash.length === 39 ? hash.slice(3, 35) : hash);
+}
+
+/** A healthy conductor sends a note within a second of signing it; after this long unlisted, it has not. */
+const REGISTER_MIN_AGE_US = 45_000_000;
+/** The server refuses anything older than 3 min. */
+const REGISTER_MAX_AGE_US = 170_000_000;
+
+/**
+ * Our own notes the server should have and does not: fresh enough to be
+ * accepted, old enough that the conductor has had its chance, and newer
+ * than whatever the server lists for that agent.
+ */
+export function notesToRegister(own: RendezvousNote[], listed: RendezvousNote[], nowUs: number): RendezvousNote[] {
+  return own.filter((n) => {
+    if (n.tombstone) return false;
+    const age = nowUs - n.createdAt;
+    if (age < REGISTER_MIN_AGE_US || age > REGISTER_MAX_AGE_US) return false;
+    return !listed.some((l) => l.space === n.space && l.agent === n.agent && l.createdAt >= n.createdAt);
+  });
+}
+
+/** Listed notes of other agents the conductor lacks, or holds an older copy of - newest per agent. */
+export function notesToFeed(listed: RendezvousNote[], ownAgents: Set<string>, known: RendezvousNote[]): RendezvousNote[] {
+  const newest = new Map<string, RendezvousNote>();
+  for (const l of listed) {
+    if (ownAgents.has(l.agent)) continue;
+    if (known.some((k) => k.space === l.space && k.agent === l.agent && k.createdAt >= l.createdAt)) continue;
+    const key = `${l.space}/${l.agent}`;
+    const have = newest.get(key);
+    if (!have || have.createdAt < l.createdAt) newest.set(key, l);
+  }
+  return [...newest.values()];
+}
+
+/** A bootstrap server the keeper talks to. */
+export interface RendezvousServer {
+  /** `https://bootstrap.example.com` (no path). */
+  url: string;
+  /**
+   * The conductor config's `base64_auth_material_bootstrap` for a sign-in
+   * gated server (Flowsta's); omit for an open one (a community node).
+   */
+  authMaterialBase64?: string;
+}
+
+/** The subset of `@holochain/client`'s `AdminWebsocket` the keeper uses (0.20+ shapes). */
+export interface AdminWebsocketForRendezvous {
+  listApps(args: { status_filter?: unknown } | null): Promise<
+    Array<{ cell_info: Record<string, Array<{ type?: string; value?: { cell_id?: [Uint8Array, Uint8Array] } }>> }>
+  >;
+  agentInfo(args: { dna_hashes: null }): Promise<string[]>;
+  addAgentInfo(args: { agent_infos: string[] }): Promise<unknown>;
+}
+
+/** What one round did. */
+export interface RendezvousRound {
+  /** Our notes we registered ourselves. */
+  registered: number;
+  /** Other devices' notes we handed the conductor. */
+  fed: number;
+  /** Servers that answered. */
+  reached: number;
+  /** Our fresh notes a server already had: the conductor is doing its job. */
+  conductorRegistered: number;
+}
+
+export interface KeepRegisteredConfig {
+  adminWebsocket: AdminWebsocketForRendezvous;
+  servers: RendezvousServer[];
+  /** Milliseconds between rounds (default 60 000); `0` = no timer, call `runOnce` yourself. */
+  intervalMs?: number;
+  /** Delay before the first round (default 70 000: the conductor's own first send has had its chance). */
+  firstDelayMs?: number;
+  /** Where one-line notices go (default: nowhere). */
+  log?: (line: string) => void;
+  /** For tests: the fetch to use and the clock, in microseconds. */
+  fetch?: typeof fetch;
+  nowUs?: () => number;
+}
+
+export interface KeepRegisteredController {
+  /** One round now: list, register, feed. */
+  runOnce(): Promise<RendezvousRound>;
+  /** Stop the timer. */
+  stop(): void;
+}
+
+/**
+ * Keep this device's agents listed on the rendezvous and hand the conductor
+ * the peers it has not heard of, when the conductor's own registration has
+ * stalled (see the section comment). Start it once the conductor is up:
+ *
+ * ```ts
+ * const keeper = keepRegistered({
+ *   adminWebsocket,
+ *   servers: [{ url: 'https://bootstrap.example.com' }],
+ *   log: (line) => console.info(line),
+ * });
+ * // on shutdown: keeper.stop()
+ * ```
+ *
+ * Notices are written only when the picture changes: the first time it had
+ * to step in, when the conductor registers again, when no server answers.
+ */
+export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredController {
+  const doFetch = config.fetch ?? fetch;
+  const nowUs = config.nowUs ?? (() => Date.now() * 1000);
+  const log = config.log ?? (() => {});
+  const tokens = new Map<string, string>();
+  let stalledSinceMs: number | null = null;
+  let everyServerDark = false;
+
+  const authenticate = async (server: RendezvousServer): Promise<void> => {
+    if (!server.authMaterialBase64) return;
+    const bin = atob(server.authMaterialBase64.trim());
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    const r = await doFetch(`${server.url.replace(/\/+$/, '')}/authenticate`, { method: 'PUT', body: bytes });
+    if (!r.ok) throw new Error(`authenticate: HTTP ${r.status}`);
+    const body = await r.text();
+    let token: string | undefined;
+    try {
+      token = (JSON.parse(body) as { authToken?: string }).authToken;
+    } catch {
+      token = body.trim() || undefined;
+    }
+    if (!token) throw new Error('authenticate: no token in the answer');
+    tokens.set(server.url, token);
+  };
+
+  const send = async (server: RendezvousServer, path: string, init: RequestInit): Promise<Response> => {
+    const base = server.url.replace(/\/+$/, '');
+    if (server.authMaterialBase64 && !tokens.has(server.url)) await authenticate(server);
+    const withAuth = (): RequestInit => {
+      const token = tokens.get(server.url);
+      return token ? { ...init, headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` } } : init;
+    };
+    let r = await doFetch(`${base}${path}`, withAuth());
+    if (r.status === 401 && server.authMaterialBase64) {
+      tokens.delete(server.url);
+      await authenticate(server);
+      r = await doFetch(`${base}${path}`, withAuth());
+    }
+    return r;
+  };
+
+  const list = async (server: RendezvousServer, space: string): Promise<RendezvousNote[]> => {
+    const r = await send(server, `/bootstrap/${space}`, { method: 'GET' });
+    if (!r.ok) throw new Error(`list: HTTP ${r.status}`);
+    const items = (await r.json()) as unknown[];
+    return items
+      .map((v) => parseRendezvousNote(typeof v === 'string' ? v : JSON.stringify(v)))
+      .filter((n): n is RendezvousNote => n !== null);
+  };
+
+  const runOnce = async (): Promise<RendezvousRound> => {
+    const admin = config.adminWebsocket;
+    const apps = await admin.listApps({ status_filter: 'enabled' });
+    const ownAgents = new Set<string>();
+    const spaces = new Set<string>();
+    for (const app of apps) {
+      for (const cells of Object.values(app.cell_info)) {
+        for (const cell of cells) {
+          const id = cell.value?.cell_id;
+          if (!id) continue;
+          spaces.add(rendezvousIdCore(id[0]));
+          ownAgents.add(rendezvousIdCore(id[1]));
+        }
+      }
+    }
+    const round: RendezvousRound = { registered: 0, fed: 0, reached: 0, conductorRegistered: 0 };
+    if (spaces.size === 0) return round;
+    const notes = (await admin.agentInfo({ dna_hashes: null }))
+      .map(parseRendezvousNote)
+      .filter((n): n is RendezvousNote => n !== null);
+    const own = notes.filter((n) => ownAgents.has(n.agent));
+    const known = notes.filter((n) => !ownAgents.has(n.agent));
+    const now = nowUs();
+    const listings: RendezvousNote[] = [];
+    const reached = new Set<string>();
+    const registeredOn = new Set<string>();
+    for (const space of spaces) {
+      const ownHere = own.filter((n) => n.space === space);
+      for (const server of config.servers) {
+        let listed: RendezvousNote[];
+        try {
+          listed = await list(server, space);
+        } catch {
+          continue;
+        }
+        const serverName = server.url.replace(/\/+$/, '');
+        reached.add(serverName);
+        round.conductorRegistered += ownHere.filter(
+          (n) => now - n.createdAt <= REGISTER_MAX_AGE_US && listed.some((l) => l.agent === n.agent && l.createdAt >= n.createdAt),
+        ).length;
+        for (const note of notesToRegister(ownHere, listed, now)) {
+          try {
+            const r = await send(server, `/bootstrap/${note.space}/${note.agent}`, { method: 'PUT', body: note.raw });
+            if (r.ok) {
+              round.registered++;
+              registeredOn.add(serverName);
+            } else {
+              log(`[rendezvous] could not register an agent on ${serverName}: HTTP ${r.status}`);
+            }
+          } catch (e) {
+            log(`[rendezvous] could not register an agent on ${serverName}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        listings.push(...listed);
+      }
+    }
+    round.reached = reached.size;
+    const feed = notesToFeed(listings, ownAgents, known);
+    if (feed.length > 0) {
+      await admin.addAgentInfo({ agent_infos: feed.map((n) => n.raw) });
+      round.fed = feed.length;
+    }
+
+    if (round.reached === 0) {
+      if (!everyServerDark) {
+        log(`[rendezvous] no rendezvous answered (${config.servers.length} tried) - the other devices cannot find this one until one does`);
+        everyServerDark = true;
+      }
+      return round;
+    }
+    if (everyServerDark) {
+      log('[rendezvous] a rendezvous answers again');
+      everyServerDark = false;
+    }
+    if (round.registered > 0) {
+      const on = [...registeredOn].sort().join(', ');
+      if (stalledSinceMs === null) {
+        stalledSinceMs = Date.now();
+        log(`[rendezvous] registered ${round.registered} agent note(s) on ${on} ourselves - the conductor's own registration did not reach the server`);
+      } else {
+        log(`[rendezvous] registered ${round.registered} note(s) ourselves (${Math.round((Date.now() - stalledSinceMs) / 60000)} min since the conductor last managed)`);
+      }
+    } else if (round.conductorRegistered > 0 && stalledSinceMs !== null) {
+      log(`[rendezvous] the conductor is registering again (we covered ${Math.round((Date.now() - stalledSinceMs) / 60000)} min)`);
+      stalledSinceMs = null;
+    }
+    if (round.fed > 0) log(`[rendezvous] handed the conductor ${round.fed} note(s) of other devices it had not heard of`);
+    return round;
+  };
+
+  const intervalMs = config.intervalMs ?? 60_000;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const tick = async (): Promise<void> => {
+    if (stopped) return;
+    try {
+      await runOnce();
+    } catch {
+      // The conductor may be restarting; the next round tries again.
+    }
+    if (!stopped && intervalMs > 0) timer = setTimeout(tick, intervalMs);
+  };
+  if (intervalMs > 0) timer = setTimeout(tick, config.firstDelayMs ?? 70_000);
+  return {
+    runOnce,
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
