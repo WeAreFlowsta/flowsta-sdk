@@ -2960,11 +2960,32 @@ export interface RendezvousRound {
   reached: number;
   /** Our fresh notes a server already had: the conductor is doing its job. */
   conductorRegistered: number;
+  /** Our notes we registered on a server the conductor was not configured with (an open fallback): extra reach, never a stall. */
+  registeredElsewhere: number;
+}
+
+/**
+ * Is `url` the server the conductor itself registers with? The one in its
+ * config's `network.bootstrap_url`; unknown = the first server in the list.
+ * Only that server's listing can show a stalled registration: the conductor
+ * never registers on the others.
+ */
+export function isConductorsRendezvous(url: string, index: number, conductorServer?: string): boolean {
+  const norm = (u: string) => u.replace(/\/+$/, '');
+  return conductorServer ? norm(url) === norm(conductorServer) : index === 0;
 }
 
 export interface KeepRegisteredConfig {
   adminWebsocket: AdminWebsocketForRendezvous;
   servers: RendezvousServer[];
+  /**
+   * The server the conductor was configured with (its config's
+   * `network.bootstrap_url`), when it is not the first in `servers` - say
+   * the first was down at launch and the conductor started on a fallback.
+   * Registering on the other servers is extra reach; only this one's
+   * listing can show the conductor's own registration stalled.
+   */
+  conductorServer?: string;
   /** Milliseconds between rounds (default 60 000); `0` = no timer, call `runOnce` yourself. */
   intervalMs?: number;
   /** Delay before the first round (default 70 000: the conductor's own first send has had its chance). */
@@ -3008,6 +3029,7 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
   /** Notes we have registered, as `space/agent/createdAt`: each note once, as the conductor itself sends it. */
   const registeredNotes = new Map<string, number>();
   let stalledSinceMs: number | null = null;
+  const toldElsewhere = new Set<string>();
   let everyServerDark = false;
 
   const authenticate = async (server: RendezvousServer): Promise<void> => {
@@ -3067,7 +3089,7 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
         }
       }
     }
-    const round: RendezvousRound = { registered: 0, registeredBlind: 0, fed: 0, reached: 0, conductorRegistered: 0 };
+    const round: RendezvousRound = { registered: 0, registeredBlind: 0, fed: 0, reached: 0, conductorRegistered: 0, registeredElsewhere: 0 };
     if (spaces.size === 0) return round;
     const notes = (await admin.agentInfo({ dna_hashes: null }))
       .map(parseRendezvousNote)
@@ -3079,9 +3101,11 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
     const listings: RendezvousNote[] = [];
     const reached = new Set<string>();
     const registeredOn = new Set<string>();
+    const registeredElsewhereOn = new Set<string>();
     for (const space of spaces) {
       const ownHere = own.filter((n) => n.space === space);
-      for (const server of config.servers) {
+      for (const [index, server] of config.servers.entries()) {
+        const conductors = isConductorsRendezvous(server.url, index, config.conductorServer);
         let listed: RendezvousNote[];
         try {
           listed = await list(server, space);
@@ -3090,9 +3114,11 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
         }
         const serverName = server.url.replace(/\/+$/, '');
         reached.add(serverName);
-        round.conductorRegistered += ownHere.filter(
-          (n) => now - n.createdAt <= REGISTER_MAX_AGE_US && listed.some((l) => l.agent === n.agent && l.createdAt >= n.createdAt),
-        ).length;
+        if (conductors) {
+          round.conductorRegistered += ownHere.filter(
+            (n) => now - n.createdAt <= REGISTER_MAX_AGE_US && listed.some((l) => l.agent === n.agent && l.createdAt >= n.createdAt),
+          ).length;
+        }
         const full = listed.length >= RENDEZVOUS_LISTING_CAP;
         for (const note of notesToRegister(ownHere, listed, now)) {
           const key = `${note.space}/${note.agent}/${note.createdAt}`;
@@ -3100,7 +3126,10 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
           registeredNotes.set(key, note.createdAt);
           try {
             const r = await send(server, `/bootstrap/${note.space}/${note.agent}`, { method: 'PUT', body: note.raw });
-            if (r.ok && full) {
+            if (r.ok && !conductors) {
+              round.registeredElsewhere++;
+              registeredElsewhereOn.add(serverName);
+            } else if (r.ok && full) {
               round.registeredBlind++;
             } else if (r.ok) {
               round.registered++;
@@ -3146,6 +3175,11 @@ export function keepRegistered(config: KeepRegisteredConfig): KeepRegisteredCont
       stalledSinceMs = null;
     }
     if (round.fed > 0) log(`[rendezvous] handed the conductor ${round.fed} note(s) of other devices it had not heard of`);
+    for (const name of registeredElsewhereOn) {
+      if (toldElsewhere.has(name)) continue;
+      toldElsewhere.add(name);
+      log(`[rendezvous] this device is listed on ${name} too, so other devices find it if the conductor's own rendezvous goes dark`);
+    }
     return round;
   };
 

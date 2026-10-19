@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [3.10.3] - 2026-10-19
+
+### Fixed
+- `keepRegistered` reports a stalled registration only against the server the conductor was configured with. On the other servers in `servers` (open fallbacks) the conductor never registers, so the keeper's registrations there are extra reach, counted in `RendezvousRound.registeredElsewhere` and said once per server; 3.10.2 and earlier reported "the conductor's own registration did not reach the server" for them every few minutes. New `KeepRegisteredConfig.conductorServer` names the conductor's server when it is not the first in `servers` (the first was down at launch); `isConductorsRendezvous` is the rule.
+
 ## [3.10.2] - 2026-10-19
 
 ### Fixed

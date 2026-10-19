@@ -7,6 +7,7 @@ import {
   rendezvousIdCore,
   type AdminWebsocketForRendezvous,
   type RendezvousNote,
+  isConductorsRendezvous,
 } from './index';
 
 const NOW_US = 2_000_000_000_000_000;
@@ -134,7 +135,7 @@ describe('keepRegistered', () => {
     });
 
     const first = await keeper.runOnce();
-    expect(first).toEqual({ registered: 2, registeredBlind: 0, fed: 1, reached: 1, conductorRegistered: 0 });
+    expect(first).toEqual({ registered: 2, registeredBlind: 0, fed: 1, reached: 1, registeredElsewhere: 0, conductorRegistered: 0 });
     const auth = calls.find((c) => c.url.endsWith('/authenticate'));
     expect(auth?.method).toBe('PUT');
     expect(new TextDecoder().decode(auth?.body as Uint8Array)).toBe('material');
@@ -148,7 +149,7 @@ describe('keepRegistered', () => {
     // Listed now, and the peer is known: a quiet round.
     const { ws: ws2 } = admin(own, [peer]);
     const quiet = keepRegistered({ adminWebsocket: ws2, servers: [{ url: 'https://boot.example', authMaterialBase64: btoa('material') }], intervalMs: 0, fetch: fetchMock as unknown as typeof fetch, nowUs: () => NOW_US });
-    expect(await quiet.runOnce()).toEqual({ registered: 0, registeredBlind: 0, fed: 0, reached: 1, conductorRegistered: 2 });
+    expect(await quiet.runOnce()).toEqual({ registered: 0, registeredBlind: 0, fed: 0, reached: 1, registeredElsewhere: 0, conductorRegistered: 2 });
     keeper.stop();
   });
 
@@ -201,3 +202,14 @@ describe('keepRegistered', () => {
     timed.stop();
   });
 });
+
+describe('isConductorsRendezvous', () => {
+  it('counts only the server the conductor was configured with', () => {
+    expect(isConductorsRendezvous('https://bootstrap.example.com/', 0, 'https://bootstrap.example.com')).toBe(true);
+    expect(isConductorsRendezvous('https://fallback.example.com', 1, 'https://bootstrap.example.com')).toBe(false);
+    expect(isConductorsRendezvous('https://fallback.example.com', 1, 'https://fallback.example.com/')).toBe(true);
+    expect(isConductorsRendezvous('https://bootstrap.example.com', 0)).toBe(true);
+    expect(isConductorsRendezvous('https://fallback.example.com', 1)).toBe(false);
+  });
+});
+
