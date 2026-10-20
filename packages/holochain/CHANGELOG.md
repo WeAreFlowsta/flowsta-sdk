@@ -34,6 +34,8 @@ Additive. Needs no Vault change.
 
 ## 3.8.0
 
+Not published to npm: these additions first shipped in 3.9.0.
+
 Additive. Pairs with Flowsta Vault 1.6.1; older Vaults answer the new call with "not available" and ignore the new option.
 
 - `getAppSecret({ label })`: a 32-byte secret for this app and label that is the same on every one of the person's devices - the Vault derives it from the identity seed, scoped to the app. `null` on an older Vault.

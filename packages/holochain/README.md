@@ -212,7 +212,7 @@ const elsewhere = stats.otherDevices ?? [];
 
 Which labels to read across devices is the app's decision: things that belong to the **person** (a recovery label carrying the app's own keys, a document they expect on every device) are read across; things that belong to the **install** (a per-device index, a cache) are not. Writes always land in this device's own slot. A replay restore (`restoreFromVault`) must be switched off when another device already holds the data - it would author every record again as new.
 
-### One identity, several devices: one private network per app _(3.8.0, Vault 1.6.1+)_
+### One identity, several devices: one private network per app _(3.9.0, Vault 1.6.1+)_
 
 A person installs your app on each of their devices and signs in with the same Flowsta identity on each. For the app's own Holochain data to sync between those installs they must be on **one private network** - the same `network_seed` on every device - and the Vault can hand your app exactly that:
 
