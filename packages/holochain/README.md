@@ -584,14 +584,16 @@ try {
 
 ### 1. Add zomes to your DNA
 
+Pin the tag for your Holochain line: `v0.4.0` for Holochain 0.7.1, `v0.3.0` for 0.6.x.
+
 ```toml
 # integrity Cargo.toml
 [dependencies]
-flowsta-agent-linking-integrity = { git = "https://github.com/WeAreFlowsta/flowsta-agent-linking" }
+flowsta-agent-linking-integrity = { git = "https://github.com/WeAreFlowsta/flowsta-agent-linking", tag = "v0.4.0" }
 
 # coordinator Cargo.toml
 [dependencies]
-flowsta-agent-linking-coordinator = { git = "https://github.com/WeAreFlowsta/flowsta-agent-linking" }
+flowsta-agent-linking-coordinator = { git = "https://github.com/WeAreFlowsta/flowsta-agent-linking", tag = "v0.4.0" }
 ```
 
 ```yaml
