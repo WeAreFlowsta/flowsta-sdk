@@ -98,6 +98,21 @@ An app whose webview storage can be cleared while the app's own data stays (or t
 
 The calls that carry the token and `client_id`: `authenticateWithVault`, `signDocument`, `backupToVault`, `retrieveFromVault`, `restoreFromVault`, `startAutoBackup`, `wouldOverwriteNonEmptyBackup`, `listVaultBackups`, `getAppSecret`, `getAppNetworkSecret`, `getFlowstaLinkStatus`, `checkFlowstaLinkStatus`, `revokeFlowstaIdentity`, and `getVaultStatus` when you pass it `{ clientId }`. Each takes an optional `localAgentPubKey` for apps with more than one install key. `getAppSecret` takes an optional `clientId`, and `listVaultBackups(ipcUrl?, { clientId, localAgentPubKey? })` and `getVaultStatus(ipcUrl?, { clientId, localAgentPubKey? })` take the app as a second argument; without it, `getAppSecret` and `listVaultBackups` speak for the app that linked last from this storage.
 
+### `setVaultOrigin(origin)` _(3.12.0)_: programs that are not a page
+
+The Vault keeps a connection under the origin its request carried, and finds it again by the origin of each later request. A browser page or a webview window sends its origin by itself. A program that is not a page (Node, an Electron main process, a command-line tool) sends none, so it says which origin it is, once at startup:
+
+```typescript
+import { setVaultOrigin, linkFlowstaIdentity } from '@flowsta/holochain';
+
+setVaultOrigin('app://yourapp'); // the origin registered for your app at dev.flowsta.com
+await linkFlowstaIdentity({ appName: 'Your App', clientId, localAgentPubKey });
+```
+
+Pass a scheme, a host and optionally a port, with no path. The same value must be listed for your app at dev.flowsta.com, and every later call must present it too, so set it before any other call. `getVaultOrigin()` returns what is set; `setVaultOrigin(null)` clears it.
+
+Without it, such a program can read the Vault's status, but its request to connect is refused before any dialog (`VaultRequestRefusedError`, `code: 'origin_required'`, from Flowsta Vault 1.8.0; earlier Vaults made a connection that no later call could use). It has no effect in a browser page or a webview window: a browser sends the page's own origin and ignores any other.
+
 ### `getFlowstaIdentity(options)`
 
 Query linked Flowsta identities for an agent on your DHT.
@@ -563,7 +578,7 @@ Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the us
 | `LinkTokenError` _(3.11.0)_ | The Vault does not accept this app's link token (`code: 'invalid_link_token'`: the app was disconnected in the Vault or linked again elsewhere; the SDK has forgotten the token), or the link needs its token and the app holds none (`code: 'link_token_required'`) | "Reconnect to your Vault" - run `linkFlowstaIdentity` again |
 | `AppAmbiguousError` _(3.11.0)_ | Several linked apps share this origin and the call did not say which one it is | Developer error: pass `clientId`, or link through `linkFlowstaIdentity` so the SDK holds a token |
 | `OriginNotRegisteredError` _(3.11.0)_ | `linkFlowstaIdentity` from an origin that is not on the list the app registered at dev.flowsta.com. No dialog is shown | Developer error: add the origin to the app |
-| `VaultRequestRefusedError` _(3.11.0)_ | The request reached the Vault under a name other than `127.0.0.1` / `localhost` (`code: 'not_addressed_here'`), or a browser sent a POST with no `Origin` (`code: 'origin_required'`) | Developer error: call `http://127.0.0.1:<port>` with a normal `fetch` |
+| `VaultRequestRefusedError` _(3.11.0)_ | The request reached the Vault under a name other than `127.0.0.1` / `localhost` (`code: 'not_addressed_here'`), or a request carried no `Origin` where one is needed: a browser's POST, or a request to connect from a program that is not a page, which calls `setVaultOrigin` first (`code: 'origin_required'`) | Developer error: call `http://127.0.0.1:<port>` with a normal `fetch` |
 | `IdentityMismatchError` _(3.0.0)_ | The Vault's active identity differs from the one this app is bound to (writes), or a backup doesn't decrypt under the active identity (reads, Vault 409) | "Unlock the matching Vault, or sign in again" |
 
 ```typescript

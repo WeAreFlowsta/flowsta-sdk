@@ -307,8 +307,11 @@ export class OriginNotRegisteredError extends FlowstaHolochainError {
  * - `not_addressed_here`: the request reached the Vault under a name other
  *   than `localhost`, `127.x.x.x` or `::1` (`host.docker.internal`, a
  *   `*.localhost` name). Call the Vault at `http://127.0.0.1:<port>`.
- * - `origin_required`: a browser sent a POST with no `Origin` header. Call
- *   the Vault with a normal cross-origin `fetch` from your page.
+ * - `origin_required`: the request carried no `Origin` where one is needed.
+ *   From a page, call the Vault with a normal cross-origin `fetch`. From a
+ *   program that is not a page (Node, an Electron main process), a request
+ *   to connect needs the app's registered origin: call `setVaultOrigin`
+ *   first.
  */
 export class VaultRequestRefusedError extends FlowstaHolochainError {
   constructor(code: 'not_addressed_here' | 'origin_required', description?: string) {
@@ -316,7 +319,7 @@ export class VaultRequestRefusedError extends FlowstaHolochainError {
       description ||
         (code === 'not_addressed_here'
           ? 'The Vault only answers requests addressed to this computer (127.0.0.1 or localhost).'
-          : 'The Vault refused a browser request that carried no Origin header.'),
+          : 'The Vault refused a request that carried no Origin header. A program that is not a page calls setVaultOrigin first.'),
       code,
       description,
     );
@@ -651,6 +654,58 @@ function throwVaultRefusal(data: { error?: unknown; description?: string }, link
   }
 }
 
+// ── The origin a program presents ─────────────────────────────────
+//
+// The Vault keeps a connection under the origin its request carried and
+// finds it again by the origin of each later request. A browser page and a
+// webview window send theirs by themselves. A program that is not a page
+// (Node, an Electron main process, a command-line tool) sends none, so it
+// says which origin it is: the one registered for the app.
+
+let _vaultOrigin: string | null = null;
+
+/**
+ * Say which origin this program presents to the Vault. For programs that
+ * are not a page: Node, an Electron main process, a command-line tool. Pass
+ * the origin you registered for your app at dev.flowsta.com (for example
+ * `app://yourapp` or `http://localhost:3000`): a scheme, a host and
+ * optionally a port, with no path. `null` clears it.
+ *
+ * Call it once at startup, before any other call. Without it such a
+ * program can read the Vault's status, but its request to connect is
+ * refused (`VaultRequestRefusedError`, `origin_required`), because the
+ * Vault could not find the connection again.
+ *
+ * It has no effect in a browser page or a webview window: a browser sends
+ * the page's own origin and ignores any other. _(3.12.0)_
+ */
+export function setVaultOrigin(origin: string | null): void {
+  if (origin === null) {
+    _vaultOrigin = null;
+    return;
+  }
+  if (typeof origin !== 'string' || !/^[a-z][a-z0-9+.-]*:\/\/[^\/\s?#]+$/i.test(origin)) {
+    throw new FlowstaHolochainError(
+      'setVaultOrigin takes an origin: a scheme, a host and optionally a port, with no path (for example app://yourapp or http://localhost:3000).',
+      'invalid_origin',
+    );
+  }
+  _vaultOrigin = origin;
+}
+
+/** The origin set with `setVaultOrigin`, or `null`. _(3.12.0)_ */
+export function getVaultOrigin(): string | null {
+  return _vaultOrigin;
+}
+
+/** Every request to the Vault goes through here, so each carries the origin. */
+function vaultFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  if (!_vaultOrigin) return fetch(input, init);
+  const headers = new Headers(init.headers ?? {});
+  headers.set('Origin', _vaultOrigin);
+  return fetch(input, { ...init, headers });
+}
+
 // ── Vault discovery (port sweep) ──────────────────────────────────
 //
 // The Vault binds 27777, or the next port up when that is taken (a second
@@ -710,7 +765,7 @@ async function probeStatusDetail(url: string, timeoutMs = 1500): Promise<PortPro
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const r = await fetch(`${url}/status`, { signal: controller.signal, ...LOOPBACK_FETCH_INIT });
+    const r = await vaultFetch(`${url}/status`, { signal: controller.signal, ...LOOPBACK_FETCH_INIT });
     clearTimeout(timeout);
     if (!r.ok) return null;
     const data = await r.json().catch(() => ({}));
@@ -1215,7 +1270,7 @@ export async function getVaultStatus(ipcUrl?: string, link?: VaultLinkSelector):
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2000);
       try {
-        return await fetch(`${url}/status${query}`, {
+        return await vaultFetch(`${url}/status${query}`, {
           signal: controller.signal,
           ...LOOPBACK_FETCH_INIT,
         });
@@ -1306,7 +1361,7 @@ export async function getFlowstaLinkStatus(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
 
-    const response = await fetch(
+    const response = await vaultFetch(
       `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${vaultLinkQuery(link, '&', false)}${expectedIdentityQuery('&')}`,
       { signal: controller.signal },
     );
@@ -1390,7 +1445,7 @@ export async function linkFlowstaIdentity(
   if (!status.unlocked) throw new VaultLockedError();
 
   // Step 2: Request identity link signature
-  const response = await fetch(`${ipcUrl}/link-identity`, {
+  const response = await vaultFetch(`${ipcUrl}/link-identity`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1523,7 +1578,7 @@ export async function revokeFlowstaIdentity(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    response = await fetch(`${ipcUrl}/revoke-identity`, {
+    response = await vaultFetch(`${ipcUrl}/revoke-identity`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -1586,7 +1641,7 @@ export async function checkFlowstaLinkStatus(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
 
-    const response = await fetch(
+    const response = await vaultFetch(
       `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${vaultLinkQuery(link, '&', false)}${expectedIdentityQuery('&')}`,
       { signal: controller.signal },
     );
@@ -1682,7 +1737,7 @@ export async function backupToVault(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
-    response = await fetch(`${ipcUrl}/backup`, {
+    response = await vaultFetch(`${ipcUrl}/backup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -1764,7 +1819,7 @@ export async function retrieveFromVault(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
-    response = await fetch(`${ipcUrl}/backup/retrieve`, {
+    response = await vaultFetch(`${ipcUrl}/backup/retrieve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -1854,7 +1909,7 @@ export async function getAppSecret(
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    response = await fetch(`${ipcUrl}/app-secret`, {
+    response = await vaultFetch(`${ipcUrl}/app-secret`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -1999,7 +2054,7 @@ export async function wouldOverwriteNonEmptyBackup(
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
-    response = await fetch(`${ipcUrl}/backup/retrieve`, {
+    response = await vaultFetch(`${ipcUrl}/backup/retrieve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -2060,7 +2115,7 @@ export async function listVaultBackups(
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const linkQuery = vaultLinkQuery(presented, '?');
-    const response = await fetch(
+    const response = await vaultFetch(
       `${ipcUrl}/backup/list${linkQuery}${expectedIdentityQuery(linkQuery ? '&' : '?')}`,
       { signal: controller.signal },
     );
@@ -2258,7 +2313,7 @@ export async function signDocument(
   const timeout = setTimeout(() => controller.abort(), 70000); // 70s (60s Vault timeout + buffer)
 
   try {
-    const response = await fetch(`${ipcUrl}/sign-document`, {
+    const response = await vaultFetch(`${ipcUrl}/sign-document`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -2418,7 +2473,7 @@ export async function authenticateWithVault(
   const timeout = setTimeout(() => controller.abort(), 125000);
 
   try {
-    const response = await fetch(`${ipcUrl}/authenticate`, {
+    const response = await vaultFetch(`${ipcUrl}/authenticate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -2488,7 +2543,7 @@ export async function getSigningStatus(
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${ipcUrl}/status`, {
+    const response = await vaultFetch(`${ipcUrl}/status`, {
       signal: controller.signal,
     });
     clearTimeout(timeout);
