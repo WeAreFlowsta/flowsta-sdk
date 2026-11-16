@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.12.0] - 2026-11-17
+
+Additive. Nothing changes for a browser page or a webview window.
+
+### Added
+- **`setVaultOrigin(origin)` and `getVaultOrigin()`**, for programs that are not a page (Node, an Electron main process, a command-line tool). Such a program sends no origin by itself, and the Vault keeps and finds a connection by its origin. Set the origin registered for the app once at startup and every request to the Vault carries it. Without it a request to connect is refused by the Vault before any dialog (`VaultRequestRefusedError`, `origin_required`); earlier Vaults made a connection that no later call could use.
+
+### Changed
+- `VaultRequestRefusedError` with `origin_required` now also covers that refusal, and its default message says to call `setVaultOrigin`.
+
+
 ## [3.11.0] - 2026-11-16
 
 Additive. Pairs with a Flowsta Vault that issues link tokens; an older Vault issues none and every call behaves as in 3.10.3.
