@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.11.0] - 2026-11-16
+
+Additive. Pairs with a Flowsta Vault that issues link tokens; an older Vault issues none and every call behaves as in 3.10.3.
+
+### Added
+- **Link token.** `linkFlowstaIdentity` asks the Vault for a link that answers to a private token (`require_link_token: true`), stores the token the Vault returns (`localStorage` key `flowsta:vault-link-token:<clientId>:<localAgentPubKey>`, memory where there is no `localStorage`) and returns it as `linkToken`. Every later Vault call presents it (`link_token` in the body of a POST, in the query string of a GET) together with `client_id`, so an app is told apart from other apps that share its origin, as desktop apps on the same webview scheme do. No code needed.
+- `getVaultLinkToken(clientId, localAgentPubKey?)`, `setVaultLinkToken(clientId, localAgentPubKey, token)`, `clearVaultLinkToken(clientId, localAgentPubKey?)` for apps that keep the token outside the webview, and `selectVaultLink(clientId, localAgentPubKey)` for apps with more than one install key. `reconnectIdentity` selects the key it reconnected.
+- Optional `localAgentPubKey` on `backupToVault`, `retrieveFromVault`, `restoreFromVault`, `startAutoBackup`, `wouldOverwriteNonEmptyBackup`, `signDocument`, `getAppSecret` and `getAppNetworkSecret`; optional `clientId` on `getAppSecret` and `revokeFlowstaIdentity`; optional second argument `{ clientId, localAgentPubKey? }` on `listVaultBackups` and `getVaultStatus`. All existing calls work unchanged.
+- Errors: `LinkTokenError` (`invalid_link_token`: the Vault no longer knows the token, and the SDK forgets it so the next link starts clean; `link_token_required`: the link needs a token the app does not hold), `AppAmbiguousError` (`app_ambiguous`), `OriginNotRegisteredError` (`origin_not_registered`, from `linkFlowstaIdentity`), `VaultRequestRefusedError` (`not_addressed_here`, `origin_required`). All extend `FlowstaHolochainError` with the Vault's code, so a `catch` that reads `error.code` keeps working.
+
+### Changed
+- `revokeFlowstaIdentity` waits up to 10 seconds for the Vault's answer (was 3) and returns `{ reachable, removed }`: `reachable` is false when no Vault answered, `removed` says whether the Vault removed the link (from the answer's `removed`; from `success` on an older Vault). It presents the link token and `client_id`, and forgets the token once the link is removed. `success` is still returned and equals `removed`. Tell the person what happened: "Disconnected", or "Disconnected here. Your Vault was not reachable and still lists this app."
+- `getFlowstaLinkStatus` answers `unlinked` (not `offline`) when the Vault refuses the app's link token: the link cannot be used from this app and linking again is the cure.
+- `getAppSecret` and `listVaultBackups` send `client_id` when the app has linked through this SDK.
+- `wouldOverwriteNonEmptyBackup` (and so `backupToVault`) throws `LinkTokenError` when the Vault refuses the link token, where any refusal used to read as "would overwrite".
+
 
 ## [3.10.3] - 2026-10-19
 
