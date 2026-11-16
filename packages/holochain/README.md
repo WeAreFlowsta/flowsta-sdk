@@ -74,7 +74,29 @@ Request an agent-linking signature from Flowsta Vault. Shows an approval dialog 
 | `localAgentPubKey` | `string` | Yes | Your agent's pubkey (`uhCAk...` format) |
 | `ipcUrl` | `string` | No | Default: sweeps `127.0.0.1:27777-27779` for the Vault (v3) |
 
-Returns `{ success: true, payload: { vaultAgentPubKey, vaultSignature } }`.
+Returns `{ success: true, payload: { vaultAgentPubKey, vaultSignature }, linkToken? }`.
+
+#### The link token _(3.11.0)_
+
+A Vault that issues link tokens answers a link with a private token for that link, and `linkFlowstaIdentity` asks for a link that answers only to its token. The SDK stores the token and presents it on every later Vault call, together with your `clientId`. You write no code for this. What it gives you:
+
+- **Your app is told apart from others on the same origin.** Every desktop app built on the same webview scheme presents the same origin (`tauri://localhost`, or `http://tauri.localhost` on Windows). The token names your app, so its backups, app secret, signatures and permissions are its own.
+- **Only your app can unlink your app.** `revokeFlowstaIdentity` presents the token.
+
+An older Vault issues no token and everything works as before.
+
+Where it is kept: `localStorage` under `flowsta:vault-link-token:<clientId>:<localAgentPubKey>` (memory when there is no `localStorage`), one token per app and per install key. Treat it like a password: do not log it or send it anywhere but the Vault.
+
+| Helper | Use |
+|--------|-----|
+| `getVaultLinkToken(clientId, localAgentPubKey?)` | Read the stored token (`null` when there is none). Without a key: the install key linked or selected last. |
+| `setVaultLinkToken(clientId, localAgentPubKey, token)` | Supply a token your app keeps elsewhere (a desktop app's own settings file), at startup. Also selects that key. |
+| `clearVaultLinkToken(clientId, localAgentPubKey?)` | Forget it. |
+| `selectVaultLink(clientId, localAgentPubKey)` | For an app with more than one install key (a profile per identity): say which one is in use now. `linkFlowstaIdentity` and a successful `reconnectIdentity` do this for the key they are given. |
+
+An app whose webview storage can be cleared while the app's own data stays (or the reverse) should keep `result.linkToken` with its link state and call `setVaultLinkToken` at startup. If the token is lost, calls throw `LinkTokenError` (`link_token_required`) and the cure is to link again.
+
+The calls that carry the token and `client_id`: `authenticateWithVault`, `signDocument`, `backupToVault`, `retrieveFromVault`, `restoreFromVault`, `startAutoBackup`, `wouldOverwriteNonEmptyBackup`, `listVaultBackups`, `getAppSecret`, `getAppNetworkSecret`, `getFlowstaLinkStatus`, `checkFlowstaLinkStatus`, `revokeFlowstaIdentity`, and `getVaultStatus` when you pass it `{ clientId }`. Each takes an optional `localAgentPubKey` for apps with more than one install key. `getAppSecret` takes an optional `clientId`, and `listVaultBackups(ipcUrl?, { clientId, localAgentPubKey? })` and `getVaultStatus(ipcUrl?, { clientId, localAgentPubKey? })` take the app as a second argument; without it, `getAppSecret` and `listVaultBackups` speak for the app that linked last from this storage.
 
 ### `getFlowstaIdentity(options)`
 
@@ -323,7 +345,9 @@ await fetch('https://auth-api.flowsta.com/auth/vault/token', {
 
 Options: `{ ipcUrl?, appName?, reason?, clientId?, scopes? }`. With `clientId` + `scopes: ['email']` _(3.2.0, Vault 1.3.0+)_ the dialog shows the user the address that will be shared and says your app receives it as text it can keep; if they allow, `email` and `emailVerified: true` come back and the Vault files the same grant with Flowsta, so `/oauth/userinfo` agrees. Scopes your app is not registered for are ignored, an unverified email is never offered, a remembered site still sees the dialog the first time it asks for email, and the user can stop sharing at any time in the Vault's Connections page. Throws `VaultBlockedError` _(3.1.0)_, `VaultNotFoundError`, `VaultLockedError` (only if the user does not unlock in time), `UserDeniedError`, `IdentityMismatchError` _(3.0.0)_, or `FlowstaHolochainError` with code `'timeout'`. On Safari, Brave and phones use `startRelayLogin` instead (see the browser table below).
 
-### `getVaultStatus(ipcUrl?)`
+### `getVaultStatus(ipcUrl?, link?)`
+
+Pass `{ clientId, localAgentPubKey? }` as the second argument _(3.11.0)_ to say which linked app is asking, so the profile fields are your app's own when several apps share its origin; the call then sends `client_id` and the stored link token. Without it the request is unchanged.
 
 Check if Flowsta Vault is running and unlocked. When the vault is unlocked, the returned `VaultStatus` carries the currently-active account's profile fields so you can render a `Signed in as ${displayName}` chip without hitting `/status` directly:
 
@@ -439,7 +463,31 @@ for the layout-level banner + greyed-out profile chip pattern.
 
 ### `revokeFlowstaIdentity(options)`
 
-Notify Vault that a link was revoked (best-effort, won't throw if Vault is offline).
+Tell the Vault your app is unlinking, and wait for what it did. Never throws.
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `appName` | `string` | Yes | Your app's name |
+| `localAgentPubKey` | `string` | Yes | The install key the app linked with |
+| `clientId` | `string` | No | From dev.flowsta.com. Pass it _(3.11.0)_; default: the app that linked last from this storage |
+| `ipcUrl` | `string` | No | Default: sweeps `127.0.0.1:27777-27779` |
+
+Returns `{ reachable, removed }` _(3.11.0)_ after waiting up to 10 seconds for the Vault's answer:
+
+- `reachable: true, removed: true`: the Vault removed the link.
+- `reachable: true, removed: false`: the Vault answered and removed nothing (it had no such link, or did not accept the request).
+- `reachable: false`: no Vault answered. Your app is disconnected on its own side and the Vault still lists it.
+
+```typescript
+const { reachable, removed } = await revokeFlowstaIdentity({ appName, clientId, localAgentPubKey });
+showNotice(
+  reachable
+    ? 'Disconnected.'
+    : 'Disconnected here. Your Vault was not reachable and still lists this app.',
+);
+```
+
+The stored link token is presented, and forgotten once the link is removed. An app may remove only its own link. Before 3.11.0 this call gave up after 3 seconds and returned `{ success }`; `success` is still returned (it equals `removed`), so existing callers keep working. With a Vault older than link tokens, `removed` follows that Vault's `success`.
 
 ### `checkFlowstaLinkStatus(options)` _(deprecated — use `getFlowstaLinkStatus`)_
 
@@ -512,6 +560,10 @@ Returns `{ available, vaultRunning, vaultUnlocked }`. Does **not** prompt the us
 | `RestoreInProgressError` _(2.4.0)_ | Concurrent `restoreFromVault` calls collided | Disable the restore button while one is running |
 | `DecodeFailedError` _(2.4.0)_ | `decodeRecordForExport` threw on an entry | Backup continues; record carries `_warning: "decode_failed"` |
 | `EmptyBackupSkippedError` _(3.0.0: every write; introduced 2.6.0)_ | A backup write was refused: an empty payload would overwrite a non-empty Vault backup | Not a failure — finish recovery; the next non-empty backup writes normally |
+| `LinkTokenError` _(3.11.0)_ | The Vault does not accept this app's link token (`code: 'invalid_link_token'`: the app was disconnected in the Vault or linked again elsewhere; the SDK has forgotten the token), or the link needs its token and the app holds none (`code: 'link_token_required'`) | "Reconnect to your Vault" - run `linkFlowstaIdentity` again |
+| `AppAmbiguousError` _(3.11.0)_ | Several linked apps share this origin and the call did not say which one it is | Developer error: pass `clientId`, or link through `linkFlowstaIdentity` so the SDK holds a token |
+| `OriginNotRegisteredError` _(3.11.0)_ | `linkFlowstaIdentity` from an origin that is not on the list the app registered at dev.flowsta.com. No dialog is shown | Developer error: add the origin to the app |
+| `VaultRequestRefusedError` _(3.11.0)_ | The request reached the Vault under a name other than `127.0.0.1` / `localhost` (`code: 'not_addressed_here'`), or a browser sent a POST with no `Origin` (`code: 'origin_required'`) | Developer error: call `http://127.0.0.1:<port>` with a normal `fetch` |
 | `IdentityMismatchError` _(3.0.0)_ | The Vault's active identity differs from the one this app is bound to (writes), or a backup doesn't decrypt under the active identity (reads, Vault 409) | "Unlock the matching Vault, or sign in again" |
 
 ```typescript

@@ -234,6 +234,96 @@ export class IdentityMismatchError extends FlowstaHolochainError {
   }
 }
 
+/**
+ * The Vault refused the link token this app presented, or refused a call
+ * that needs one. _(3.11.0, Vault with link tokens)_
+ *
+ * `code` says which:
+ * - `invalid_link_token`: the token matches no link (the app was
+ *   disconnected in the Vault, or linked again elsewhere, which ends the
+ *   older token). The SDK has already forgotten the stored token.
+ * - `link_token_required`: this app's link only answers with its token, and
+ *   the call carried none (the app's storage was cleared, or the token is
+ *   kept somewhere the SDK was not told about - see `setVaultLinkToken`).
+ *
+ * Either way the cure is the same: run `linkFlowstaIdentity` again. The
+ * person approves once and the app gets a fresh token.
+ */
+export class LinkTokenError extends FlowstaHolochainError {
+  constructor(code: 'invalid_link_token' | 'link_token_required', description?: string) {
+    super(
+      description ||
+        (code === 'invalid_link_token'
+          ? 'The Vault no longer recognizes this app\'s link. Link the app again with linkFlowstaIdentity.'
+          : 'This app\'s link needs its link token and none was sent. Link the app again with linkFlowstaIdentity.'),
+      code,
+      description,
+    );
+    this.name = 'LinkTokenError';
+  }
+}
+
+/**
+ * Several linked apps on this computer share this app's origin (two desktop
+ * apps built on the same webview scheme, for example) and the call did not
+ * say which one it is. Pass your `clientId` to the call, or link with
+ * `linkFlowstaIdentity` so the SDK holds a link token. _(3.11.0)_
+ */
+export class AppAmbiguousError extends FlowstaHolochainError {
+  constructor(description?: string) {
+    super(
+      description ||
+        'Several apps on this computer share this origin. Pass your clientId so the Vault knows which app is calling.',
+      'app_ambiguous',
+      description,
+    );
+    this.name = 'AppAmbiguousError';
+  }
+}
+
+/**
+ * The app has registered the origins it calls from at dev.flowsta.com, and
+ * this request came from an origin that is not on that list. Thrown by
+ * `linkFlowstaIdentity`; no dialog is shown. Add the origin to the app at
+ * dev.flowsta.com. _(3.11.0)_
+ */
+export class OriginNotRegisteredError extends FlowstaHolochainError {
+  constructor(description?: string) {
+    super(
+      description ||
+        'This origin is not registered for the app. Add it to the app\'s origins at dev.flowsta.com.',
+      'origin_not_registered',
+      description,
+    );
+    this.name = 'OriginNotRegisteredError';
+  }
+}
+
+/**
+ * The Vault refused the request because of how it arrived, before looking
+ * at what it asked. _(3.11.0)_
+ *
+ * `code` says which:
+ * - `not_addressed_here`: the request reached the Vault under a name other
+ *   than `localhost`, `127.x.x.x` or `::1` (`host.docker.internal`, a
+ *   `*.localhost` name). Call the Vault at `http://127.0.0.1:<port>`.
+ * - `origin_required`: a browser sent a POST with no `Origin` header. Call
+ *   the Vault with a normal cross-origin `fetch` from your page.
+ */
+export class VaultRequestRefusedError extends FlowstaHolochainError {
+  constructor(code: 'not_addressed_here' | 'origin_required', description?: string) {
+    super(
+      description ||
+        (code === 'not_addressed_here'
+          ? 'The Vault only answers requests addressed to this computer (127.0.0.1 or localhost).'
+          : 'The Vault refused a browser request that carried no Origin header.'),
+      code,
+      description,
+    );
+    this.name = 'VaultRequestRefusedError';
+  }
+}
+
 // ── Identity binding ──────────────────────────────────────────────
 //
 // Bind-at-link, assert-on-call: `linkFlowstaIdentity` records the Vault
@@ -389,6 +479,175 @@ function assertBoundIdentity(vaultAgentPubKey: string | undefined): void {
   if (!bound || !vaultAgentPubKey) return;
   if (agentKeysMatch(bound, vaultAgentPubKey) === false) {
     throw new IdentityMismatchError(bound, vaultAgentPubKey);
+  }
+}
+
+// ── Link token ────────────────────────────────────────────────────
+//
+// A Vault that issues link tokens answers `linkFlowstaIdentity` with a
+// private token for that link. The app presents it on every later call,
+// which is what tells two apps that share an origin apart (every desktop app
+// on the same webview scheme does) and what proves an unlink comes from the
+// app itself. The SDK keeps it per app and per install key and sends it
+// without the developer writing code; an older Vault issues none and
+// nothing changes.
+
+const LINK_TOKEN_STORAGE_PREFIX = 'flowsta:vault-link-token:';
+const LINK_AGENT_STORAGE_PREFIX = 'flowsta:vault-link-agent:';
+const LINK_CLIENT_STORAGE_KEY = 'flowsta:vault-link-client';
+const _linkMemory = new Map<string, string>();
+
+function linkStoreGet(key: string): string | null {
+  try {
+    const stored = storageAvailable()?.getItem(key);
+    if (stored) return stored;
+  } catch {
+    // Storage present but refusing reads - the memory copy stands in.
+  }
+  return _linkMemory.get(key) ?? null;
+}
+
+function linkStoreSet(key: string, value: string): void {
+  _linkMemory.set(key, value);
+  try {
+    storageAvailable()?.setItem(key, value);
+  } catch {
+    // Full or refused - the memory copy serves this session.
+  }
+}
+
+function linkStoreRemove(key: string): void {
+  _linkMemory.delete(key);
+  try {
+    storageAvailable()?.removeItem(key);
+  } catch {
+    // Nothing to remove from a storage that refuses access.
+  }
+}
+
+/** The install key whose token is kept under `clientId`, spelled as stored. */
+function storedLinkAgent(clientId: string, localAgentPubKey?: string): string | null {
+  const selected = linkStoreGet(LINK_AGENT_STORAGE_PREFIX + clientId);
+  if (!localAgentPubKey) return selected;
+  if (linkStoreGet(LINK_TOKEN_STORAGE_PREFIX + clientId + ':' + localAgentPubKey)) return localAgentPubKey;
+  // The same key in its other spelling (base64url / base58).
+  if (selected && agentKeysMatch(selected, localAgentPubKey) === true) return selected;
+  return null;
+}
+
+/**
+ * The link token the Vault issued for this app (`clientId`) and install key,
+ * or null when there is none (never linked from here, an older Vault, or the
+ * token was cleared). Without `localAgentPubKey`: the token of the install
+ * key this app linked or selected last (`selectVaultLink`). _(3.11.0)_
+ */
+export function getVaultLinkToken(clientId: string, localAgentPubKey?: string): string | null {
+  const agent = storedLinkAgent(clientId, localAgentPubKey);
+  return agent ? linkStoreGet(LINK_TOKEN_STORAGE_PREFIX + clientId + ':' + agent) : null;
+}
+
+/**
+ * Keep a link token for this app and install key, and make it the one later
+ * calls present. Called by `linkFlowstaIdentity` on success; exported for
+ * apps that keep the token elsewhere (a desktop app's own settings file)
+ * and hand it to the SDK at startup. Kept in `localStorage` where
+ * available, in memory otherwise. _(3.11.0)_
+ */
+export function setVaultLinkToken(clientId: string, localAgentPubKey: string, token: string): void {
+  linkStoreSet(LINK_TOKEN_STORAGE_PREFIX + clientId + ':' + localAgentPubKey, token);
+  selectVaultLink(clientId, localAgentPubKey);
+}
+
+/**
+ * Forget the link token for this app and install key (without
+ * `localAgentPubKey`: the one this app linked or selected last). Called by
+ * the SDK when the Vault answers `invalid_link_token` and when
+ * `revokeFlowstaIdentity` removed the link. _(3.11.0)_
+ */
+export function clearVaultLinkToken(clientId: string, localAgentPubKey?: string): void {
+  const agent = storedLinkAgent(clientId, localAgentPubKey) ?? localAgentPubKey;
+  if (!agent) return;
+  linkStoreRemove(LINK_TOKEN_STORAGE_PREFIX + clientId + ':' + agent);
+  if (localAgentPubKey && agent !== localAgentPubKey) {
+    linkStoreRemove(LINK_TOKEN_STORAGE_PREFIX + clientId + ':' + localAgentPubKey);
+  }
+}
+
+/**
+ * Say which install key this app is using now, for an app that keeps more
+ * than one (a profile per Flowsta identity). Calls that are not given a
+ * `localAgentPubKey` present this key's token. `linkFlowstaIdentity` and a
+ * successful `reconnectIdentity` select the key they were called with, so
+ * an app with one install key never needs this. _(3.11.0)_
+ */
+export function selectVaultLink(clientId: string, localAgentPubKey: string): void {
+  linkStoreSet(LINK_AGENT_STORAGE_PREFIX + clientId, localAgentPubKey);
+  linkStoreSet(LINK_CLIENT_STORAGE_KEY, clientId);
+}
+
+/** What a Vault call presents to say which linked app it is. */
+interface VaultLinkRef {
+  /** The app's client id, when the call or the stored link knows it. */
+  clientId?: string;
+  /** The link token to present, when one is stored. */
+  token?: string;
+  /** Where that token is stored, so a refusal can forget exactly that one. */
+  tokenClientId?: string;
+  tokenAgent?: string;
+}
+
+/**
+ * Work out what a call presents. A call that names no client id speaks for
+ * the app that linked last from this storage. `companion`: the call's client
+ * id may be another app's (signing in for a companion web client), so the
+ * token of the app that linked here is presented when the named one has none.
+ */
+function vaultLinkFor(clientId?: string, localAgentPubKey?: string, companion = false): VaultLinkRef {
+  const linkedClient = linkStoreGet(LINK_CLIENT_STORAGE_KEY);
+  const named = clientId || linkedClient || undefined;
+  if (!named) return {};
+  const candidates = companion && clientId && linkedClient && linkedClient !== clientId ? [clientId, linkedClient] : [named];
+  for (const candidate of candidates) {
+    const agent = storedLinkAgent(candidate, localAgentPubKey);
+    const token = agent ? linkStoreGet(LINK_TOKEN_STORAGE_PREFIX + candidate + ':' + agent) : null;
+    if (agent && token) return { clientId: named, token, tokenClientId: candidate, tokenAgent: agent };
+  }
+  return { clientId: named };
+}
+
+/** `client_id` and `link_token` for a GET's query string. */
+function vaultLinkQuery(link: VaultLinkRef, prefix: '?' | '&', withClientId = true): string {
+  const parts: string[] = [];
+  if (withClientId && link.clientId) parts.push(`client_id=${encodeURIComponent(link.clientId)}`);
+  if (link.token) parts.push(`link_token=${encodeURIComponent(link.token)}`);
+  return parts.length ? prefix + parts.join('&') : '';
+}
+
+function isLinkTokenRefusal(error: unknown): error is 'invalid_link_token' | 'link_token_required' {
+  return error === 'invalid_link_token' || error === 'link_token_required';
+}
+
+/** After `invalid_link_token`: forget the token that was presented, so the next link starts clean. */
+function forgetRefusedLinkToken(error: unknown, link: VaultLinkRef): void {
+  if (error === 'invalid_link_token' && link.tokenClientId && link.tokenAgent) {
+    clearVaultLinkToken(link.tokenClientId, link.tokenAgent);
+  }
+}
+
+/**
+ * The refusals every Vault route can answer with, as typed errors. Called
+ * from each call's own error mapping, before its generic fallback.
+ */
+function throwVaultRefusal(data: { error?: unknown; description?: string }, link: VaultLinkRef): void {
+  const error = data.error;
+  if (isLinkTokenRefusal(error)) {
+    forgetRefusedLinkToken(error, link);
+    throw new LinkTokenError(error, data.description);
+  }
+  if (error === 'app_ambiguous') throw new AppAmbiguousError(data.description);
+  if (error === 'origin_not_registered') throw new OriginNotRegisteredError(data.description);
+  if (error === 'not_addressed_here' || error === 'origin_required') {
+    throw new VaultRequestRefusedError(error, data.description);
   }
 }
 
@@ -635,6 +894,8 @@ export async function reconnectIdentity(options: {
   if (link.state === 'offline') return { state: 'offline' };
   if (link.state === 'linked') {
     bindVaultIdentity(status.agentPubKey);
+    // Later calls present this install key's link token.
+    selectVaultLink(options.clientId, options.localAgentPubKey);
     return { state: 'reconnected', agentPubKey: status.agentPubKey, appName: link.appName };
   }
   return { state: 'approval_needed', agentPubKey: status.agentPubKey };
@@ -653,6 +914,12 @@ export interface FlowstaBackupOptions {
   contentType?: string;
   /** Vault IPC URL. Default: sweep ports 27777-27779. */
   ipcUrl?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
   /**
    * Never replace a non-empty Vault backup with an empty canonical payload.
    * Default: true (v3 - previously only `startAutoBackup` had this guard).
@@ -688,6 +955,12 @@ export interface FlowstaBackupRetrieveOptions {
   device?: string;
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
 }
 
 /** The backups one of the person's other devices holds for this app. */
@@ -734,6 +1007,12 @@ export interface FlowstaAutoBackupConfig {
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
   /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
+  /**
    * Never replace a non-empty Vault backup with an empty payload (v2.6.0+).
    * Default: true. When a write is skipped, `onError` receives an
    * `EmptyBackupSkippedError`. Only disable if your app intentionally
@@ -767,6 +1046,14 @@ export interface LinkFlowstaIdentityResult {
     /** Base64 standard encoded Ed25519 signature (64 bytes) */
     vaultSignature: string;
   };
+  /**
+   * The private token the Vault issued for this link (absent on a Vault that
+   * issues none). The SDK has already stored it and presents it on later
+   * calls; it is returned for apps that keep their link state elsewhere and
+   * supply it with `setVaultLinkToken`. Treat it like a password: never log
+   * it, never send it anywhere but the Vault. _(3.11.0)_
+   */
+  linkToken?: string;
 }
 
 export interface GetFlowstaIdentityOptions {
@@ -792,8 +1079,32 @@ export interface RevokeFlowstaIdentityOptions {
   appName: string;
   /** The third-party agent's public key in uhCAk... format */
   localAgentPubKey: string;
+  /**
+   * Developer client_id from dev.flowsta.com. Optional for compatibility;
+   * pass it so the Vault is told which app is unlinking and the right link
+   * token is presented. Default: the app that linked last from this storage. _(3.11.0)_
+   */
+  clientId?: string;
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
+}
+
+/** What `revokeFlowstaIdentity` learned from the Vault. _(3.11.0)_ */
+export interface RevokeFlowstaIdentityResult {
+  /** A Vault answered the request. False: none was running or reachable, and it still lists the app. */
+  reachable: boolean;
+  /** The Vault removed this app's link. */
+  removed: boolean;
+  /** @deprecated Same as `removed`; kept for callers written before 3.11.0. */
+  success: boolean;
+}
+
+/** Which linked app a call speaks for, when the call has no options of its own. _(3.11.0)_ */
+export interface VaultLinkSelector {
+  /** Developer client_id from dev.flowsta.com */
+  clientId: string;
+  /** The install key the app linked with. Default: the key linked or selected last. */
+  localAgentPubKey?: string;
 }
 
 export interface CheckFlowstaLinkStatusOptions {
@@ -889,20 +1200,40 @@ export type FlowstaLinkStatus =
  * Check the status of Flowsta Vault.
  *
  * @param ipcUrl - Vault IPC URL. Default: sweep ports 27777-27779.
+ * @param link - Say which linked app is asking (`{ clientId, localAgentPubKey? }`),
+ *   so the profile fields are this app's own when several apps share its
+ *   origin. Sends `client_id` and the stored link token. Omitted: the
+ *   request is exactly what it was before 3.11.0. _(3.11.0)_
  * @returns Vault status (running, unlocked, agentPubKey, version; `blocked`
  *   when the browser refused the loopback request - 3.1.0)
  */
-export async function getVaultStatus(ipcUrl?: string): Promise<VaultStatus> {
+export async function getVaultStatus(ipcUrl?: string, link?: VaultLinkSelector): Promise<VaultStatus> {
   const url = await resolveVaultUrl(ipcUrl);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
+    const presented = link ? vaultLinkFor(link.clientId, link.localAgentPubKey) : {};
+    const read = async (query: string): Promise<Response> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+      try {
+        return await fetch(`${url}/status${query}`, {
+          signal: controller.signal,
+          ...LOOPBACK_FETCH_INIT,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
 
-    const response = await fetch(`${url}/status`, {
-      signal: controller.signal,
-      ...LOOPBACK_FETCH_INIT,
-    });
-    clearTimeout(timeout);
+    let response = await read(vaultLinkQuery(presented, '?'));
+    if (!response.ok && presented.token) {
+      // A refused token must not read as "no Vault": forget it when the
+      // Vault says it is invalid, and ask again the plain way.
+      const refusal = await response.json().catch(() => ({}));
+      if (isLinkTokenRefusal(refusal.error)) {
+        forgetRefusedLinkToken(refusal.error, presented);
+        response = await read('');
+      }
+    }
 
     if (!response.ok) {
       return { running: false, unlocked: false };
@@ -969,21 +1300,30 @@ export async function getFlowstaLinkStatus(
   options: CheckFlowstaLinkStatusOptions,
 ): Promise<FlowstaLinkStatus> {
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
-      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${expectedIdentityQuery('&')}`,
+      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${vaultLinkQuery(link, '&', false)}${expectedIdentityQuery('&')}`,
       { signal: controller.signal },
     );
     clearTimeout(timeout);
 
     if (!response.ok) {
-      // HTTP-level error from a running Vault. Treat as offline so we don't
-      // surface a misleading "unlinked" state — the request shape may be
-      // wrong or the endpoint temporarily unhealthy.
+      // The Vault answered and does not accept this app's link token (or the
+      // link needs one this app no longer holds): the link cannot be used
+      // from here, which is what "unlinked" tells the app - link again.
+      const refusal = await response.json().catch(() => ({}));
+      if (isLinkTokenRefusal(refusal.error)) {
+        forgetRefusedLinkToken(refusal.error, link);
+        return { state: 'unlinked' };
+      }
+      // Any other HTTP-level error from a running Vault. Treat as offline so
+      // we don't surface a misleading "unlinked" state — the request shape
+      // may be wrong or the endpoint temporarily unhealthy.
       return { state: 'offline' };
     }
 
@@ -1034,6 +1374,7 @@ export async function getFlowstaLinkStatus(
  * @throws {InvalidClientIdError} client_id not registered at dev.flowsta.com
  * @throws {MissingClientIdError} client_id not provided
  * @throws {ApiUnreachableError} Cannot reach Flowsta API to verify app (first link requires internet)
+ * @throws {OriginNotRegisteredError} The app registered its origins at dev.flowsta.com and this one is not among them
  * @throws {FlowstaHolochainError} Other errors (timeout, invalid key, etc.)
  */
 export async function linkFlowstaIdentity(
@@ -1056,6 +1397,9 @@ export async function linkFlowstaIdentity(
       app_name: options.appName,
       client_id: options.clientId,
       app_agent_pub_key: options.localAgentPubKey,
+      // The link answers only with its token from now on (a Vault that
+      // issues link tokens; an older one ignores the field).
+      require_link_token: true,
     }),
   });
 
@@ -1065,6 +1409,7 @@ export async function linkFlowstaIdentity(
 
     if (error === 'vault_locked') throw new VaultLockedError();
     if (error === 'user_denied') throw new UserDeniedError();
+    throwVaultRefusal(data, {});
     if (error === 'invalid_client_id' || error === 'app_not_found' || error === 'app_disabled') throw new InvalidClientIdError(data.description);
     if (error === 'missing_client_id') throw new MissingClientIdError();
     if (error === 'api_unreachable') throw new ApiUnreachableError();
@@ -1084,12 +1429,23 @@ export async function linkFlowstaIdentity(
     bindVaultIdentity(data.vault_agent_pub_key);
   }
 
+  // A new link ends any older token for this key. Keep the new one, or
+  // none when the Vault issues none (an older Vault: nothing else changes).
+  const linkToken = typeof data.link_token === 'string' && data.link_token ? data.link_token : undefined;
+  clearVaultLinkToken(options.clientId, options.localAgentPubKey);
+  if (linkToken) {
+    setVaultLinkToken(options.clientId, options.localAgentPubKey, linkToken);
+  } else {
+    selectVaultLink(options.clientId, options.localAgentPubKey);
+  }
+
   return {
     success: true,
     payload: {
       vaultAgentPubKey: data.vault_agent_pub_key,
       vaultSignature: data.vault_signature,
     },
+    ...(linkToken ? { linkToken } : {}),
   };
 }
 
@@ -1125,53 +1481,78 @@ export async function getFlowstaIdentity(
 }
 
 /**
- * Notify Flowsta Vault that an identity link was revoked.
+ * Tell Flowsta Vault this app is unlinking, and wait for what it did.
  *
- * Best-effort -- if Vault is not running, returns `{ success: false }`
- * without throwing. The DHT revocation (calling `revoke_link` on your
- * zome) is what matters; this is just a courtesy notification so Vault
- * can update its UI immediately.
+ * Waits up to 10 seconds for the Vault's answer and never throws:
+ * - `{ reachable: true, removed: true }`: the Vault removed the link.
+ * - `{ reachable: true, removed: false }`: the Vault answered and removed
+ *   nothing (it had no such link, or it did not accept the request).
+ * - `{ reachable: false, removed: false }`: no Vault answered. The app is
+ *   disconnected on its own side, and the Vault still lists it until the
+ *   person removes it there or the app unlinks again.
+ *
+ * Say what happened: "Disconnected", or "Disconnected here. Your Vault was
+ * not reachable and still lists this app." The DHT revocation (calling
+ * `revoke_link` on your zome) is separate and still yours to do.
+ *
+ * The stored link token is presented when there is one, which is what
+ * proves the unlink comes from the app that made the link, and it is
+ * forgotten once the link is removed. Before 3.11.0 this call gave up after
+ * 3 seconds and returned `{ success }` only; `success` is still there.
  *
  * @example
  * ```typescript
  * // After calling revoke_link on your zome:
- * await revokeFlowstaIdentity({
+ * const { reachable, removed } = await revokeFlowstaIdentity({
  *   appName: 'ProofPoll',
+ *   clientId: 'flowsta_app_abc123...',
  *   localAgentPubKey: myAgentKey,
  * });
+ * if (!reachable) showNotice('Disconnected here. Your Vault was not reachable and still lists this app.');
  * ```
  */
 export async function revokeFlowstaIdentity(
   options: RevokeFlowstaIdentityOptions,
-): Promise<{ success: boolean }> {
+): Promise<RevokeFlowstaIdentityResult> {
   // Sweep 27777-27779 like every other call: on a shifted port the revoke
   // silently never reached the Vault and it kept listing the app.
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
 
+  let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-
-    const response = await fetch(`${ipcUrl}/revoke-identity`, {
+    response = await fetch(`${ipcUrl}/revoke-identity`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
         app_name: options.appName,
         app_agent_pub_key: options.localAgentPubKey,
+        ...(link.clientId ? { client_id: link.clientId } : {}),
+        ...(link.token ? { link_token: link.token } : {}),
       }),
     });
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      return { success: false };
-    }
-
-    const data = await response.json();
-    return { success: !!data.success };
   } catch {
-    return { success: false };
+    return { reachable: false, removed: false, success: false };
+  } finally {
+    clearTimeout(timeout);
   }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    forgetRefusedLinkToken(data.error, link);
+    return { reachable: true, removed: false, success: false };
+  }
+
+  // A Vault that reports `removed` says whether a link went; an older one
+  // answers `{ success: true }` alone.
+  const removed = typeof data.removed === 'boolean' ? data.removed : !!data.success;
+  if (removed && link.tokenClientId && link.tokenAgent) {
+    clearVaultLinkToken(link.tokenClientId, link.tokenAgent);
+  }
+  return { reachable: true, removed, success: removed };
 }
 
 /**
@@ -1199,18 +1580,21 @@ export async function checkFlowstaLinkStatus(
   options: CheckFlowstaLinkStatusOptions,
 ): Promise<{ linked: boolean; appName?: string }> {
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
-      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${expectedIdentityQuery('&')}`,
+      `${ipcUrl}/link-status?client_id=${encodeURIComponent(options.clientId)}&app_agent_pub_key=${encodeURIComponent(options.localAgentPubKey)}${vaultLinkQuery(link, '&', false)}${expectedIdentityQuery('&')}`,
       { signal: controller.signal },
     );
     clearTimeout(timeout);
 
     if (!response.ok) {
+      const refusal = await response.json().catch(() => ({}));
+      forgetRefusedLinkToken(refusal.error, link);
       return { linked: false };
     }
 
@@ -1250,6 +1634,7 @@ export async function checkFlowstaLinkStatus(
  * @throws {IdentityMismatchError} Vault holds a different identity than this app is bound to
  * @throws {EmptyBackupSkippedError} Empty canonical payload would replace a non-empty backup (v3: guard is default-on here, not just in `startAutoBackup`)
  * @throws {BackupTooLargeError} Payload exceeds the Vault's 50 MB per-backup limit
+ * @throws {LinkTokenError} The Vault no longer accepts this app's link token: link again
  * @throws {FlowstaHolochainError} Backup failed for another reason
  */
 export async function backupToVault(
@@ -1277,8 +1662,10 @@ export async function backupToVault(
     throw new EmptyBackupSkippedError();
   }
 
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
   const body = JSON.stringify({
     client_id: options.clientId,
+    link_token: link.token,
     app_name: options.appName,
     label: options.label ?? 'latest',
     data,
@@ -1315,6 +1702,7 @@ export async function backupToVault(
     if (err.error === 'backup_too_large' || response.status === 413) {
       throw new BackupTooLargeError(dataSize, 50 * 1024 * 1024);
     }
+    throwVaultRefusal(err, link);
     throw new FlowstaHolochainError(
       err.description || 'Backup failed',
       err.error || 'backup_failed',
@@ -1354,6 +1742,7 @@ export async function backupToVault(
  * @throws {VaultLockedError} Vault locked / never unlocked this session
  * @throws {IdentityMismatchError} slot exists but belongs to a different
  *   identity (Vault 409; v3: was null → silent wrong-identity "success")
+ * @throws {LinkTokenError} the Vault no longer accepts this app's link token: link again
  * @throws {FlowstaHolochainError} slot exists but is unreadable, or any other
  *   Vault error - never collapsed into "absent"
  */
@@ -1368,6 +1757,7 @@ export async function retrieveFromVault(
   fromDevice?: string | null;
 } | null> {
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
 
   let response: Response;
   try {
@@ -1380,6 +1770,7 @@ export async function retrieveFromVault(
       signal: controller.signal,
       body: JSON.stringify({
         client_id: options.clientId,
+        link_token: link.token,
         label: options.label ?? 'latest',
         expected_identity: getBoundIdentity() || undefined,
         ...(options.across ? { across: options.across } : {}),
@@ -1407,6 +1798,7 @@ export async function retrieveFromVault(
         err.description,
       );
     }
+    throwVaultRefusal(err, link);
     throw new FlowstaHolochainError(
       err.description || 'Backup retrieve failed',
       err.error || 'retrieve_failed',
@@ -1429,6 +1821,18 @@ export interface FlowstaAppSecretOptions {
   label: string;
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
+  /**
+   * Developer client_id. Optional for compatibility; pass it so the Vault is
+   * told which app is asking when several share this origin. Default: the
+   * app that linked last from this storage. _(3.11.0)_
+   */
+  clientId?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
 }
 
 /**
@@ -1445,6 +1849,7 @@ export async function getAppSecret(
   options: FlowstaAppSecretOptions,
 ): Promise<{ secretHex: string; label: string } | null> {
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
   let response: Response;
   try {
     const controller = new AbortController();
@@ -1453,7 +1858,12 @@ export async function getAppSecret(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({ label: options.label, expected_identity: getBoundIdentity() || undefined }),
+      body: JSON.stringify({
+        label: options.label,
+        expected_identity: getBoundIdentity() || undefined,
+        client_id: link.clientId,
+        link_token: link.token,
+      }),
     });
     clearTimeout(timeout);
   } catch {
@@ -1466,6 +1876,7 @@ export async function getAppSecret(
     if (err.error === 'identity_mismatch') {
       throw new IdentityMismatchError(getBoundIdentity() || undefined, undefined, err.description);
     }
+    throwVaultRefusal(err, link);
     throw new FlowstaHolochainError(err.description || 'App secret failed', err.error || 'app_secret_failed', err.description);
   }
   const result = await response.json();
@@ -1481,6 +1892,12 @@ export interface FlowstaAppNetworkSecretOptions {
   label?: string;
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity */
   ipcUrl?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
 }
 
 export interface FlowstaAppNetworkSecret {
@@ -1520,14 +1937,13 @@ export async function getAppNetworkSecret(
     const d = b?.data as { secret_hex?: unknown } | undefined;
     return typeof d?.secret_hex === 'string' && /^[0-9a-f]{64}$/i.test(d.secret_hex) ? d.secret_hex : null;
   };
-  const own = fromBackup(await retrieveFromVault({ clientId: options.clientId, label, ipcUrl: options.ipcUrl }));
+  const who = { clientId: options.clientId, localAgentPubKey: options.localAgentPubKey, ipcUrl: options.ipcUrl };
+  const own = fromBackup(await retrieveFromVault({ ...who, label }));
   if (own) return { secretHex: own, source: 'existing' };
-  const elsewhere = fromBackup(
-    await retrieveFromVault({ clientId: options.clientId, label, across: 'devices', ipcUrl: options.ipcUrl }),
-  );
+  const elsewhere = fromBackup(await retrieveFromVault({ ...who, label, across: 'devices' }));
   if (elsewhere) return { secretHex: elsewhere, source: 'existing' };
 
-  const derived = await getAppSecret({ label, ipcUrl: options.ipcUrl });
+  const derived = await getAppSecret({ ...who, label });
   let secretHex: string;
   let source: FlowstaAppNetworkSecret['source'];
   if (derived) {
@@ -1541,7 +1957,7 @@ export async function getAppNetworkSecret(
   }
   try {
     await backupToVault(
-      { clientId: options.clientId, appName: options.appName, label, ipcUrl: options.ipcUrl, protectNonEmpty: false },
+      { ...who, appName: options.appName, label, protectNonEmpty: false },
       { secret_hex: secretHex, source },
     );
   } catch {
@@ -1565,9 +1981,12 @@ export async function getAppNetworkSecret(
  * - An empty payload is allowed only when the Vault slot is confirmed empty
  *   or absent (HTTP 404). A failed probe, or an existing backup whose record
  *   count can't be read, blocks the write - when in doubt, don't overwrite.
+ *
+ * @throws {LinkTokenError} the Vault refused this app's link token (3.11.0):
+ *   that is not a judgement about the backup, and the caller must hear it
  */
 export async function wouldOverwriteNonEmptyBackup(
-  options: { clientId: string; label?: string; ipcUrl?: string },
+  options: { clientId: string; label?: string; ipcUrl?: string; localAgentPubKey?: string },
   payload: unknown,
 ): Promise<boolean> {
   const total = (payload as Partial<BackupPayload> | undefined)?._summary
@@ -1575,6 +1994,7 @@ export async function wouldOverwriteNonEmptyBackup(
   if (typeof total !== 'number' || total > 0) return false;
 
   const ipcUrl = await resolveVaultUrl(options.ipcUrl);
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
   let response: Response;
   try {
     const controller = new AbortController();
@@ -1585,6 +2005,7 @@ export async function wouldOverwriteNonEmptyBackup(
       signal: controller.signal,
       body: JSON.stringify({
         client_id: options.clientId,
+        link_token: link.token,
         label: options.label ?? 'latest',
       }),
     });
@@ -1593,6 +2014,15 @@ export async function wouldOverwriteNonEmptyBackup(
     return true; // probe failed - when in doubt, don't overwrite
   }
   if (response.status === 404) return false; // first-ever backup
+  if (response.status === 403) {
+    // A refused link token is the caller's to hear about, not a reason to
+    // report "would overwrite": the write that follows gets the same answer.
+    const refusal = await response.clone().json().catch(() => ({}));
+    if (isLinkTokenRefusal(refusal.error)) {
+      forgetRefusedLinkToken(refusal.error, link);
+      throw new LinkTokenError(refusal.error, refusal.description);
+    }
+  }
   // Any other non-OK blocks: 409 identity_mismatch means the slot holds
   // ANOTHER identity's backup - the strongest possible reason not to write.
   if (!response.ok) return true;
@@ -1611,24 +2041,36 @@ export async function wouldOverwriteNonEmptyBackup(
 /**
  * List all backups stored in the user's Flowsta Vault.
  *
+ * @param ipcUrl - Vault IPC URL. Default: probe 27777-27779.
+ * @param link - Which linked app is asking (`{ clientId, localAgentPubKey? }`).
+ *   Default: the app that linked last from this storage. Its `client_id` and
+ *   link token go in the query string. _(3.11.0)_
  * @returns Backup stats for all apps, or empty stats if vault is unavailable
  */
 export async function listVaultBackups(
   ipcUrl?: string,
+  link?: VaultLinkSelector,
 ): Promise<FlowstaBackupStats> {
   const empty: FlowstaBackupStats = { appCount: 0, totalBackups: 0, totalSize: 0, apps: [] };
   ipcUrl = await resolveVaultUrl(ipcUrl);
+  const presented = vaultLinkFor(link?.clientId, link?.localAgentPubKey);
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const response = await fetch(`${ipcUrl}/backup/list${expectedIdentityQuery('?')}`, {
-      signal: controller.signal,
-    });
+    const linkQuery = vaultLinkQuery(presented, '?');
+    const response = await fetch(
+      `${ipcUrl}/backup/list${linkQuery}${expectedIdentityQuery(linkQuery ? '&' : '?')}`,
+      { signal: controller.signal },
+    );
     clearTimeout(timeout);
 
-    if (!response.ok) return empty;
+    if (!response.ok) {
+      const refusal = await response.json().catch(() => ({}));
+      forgetRefusedLinkToken(refusal.error, presented);
+      return empty;
+    }
 
     const data = await response.json();
     return {
@@ -1737,6 +2179,12 @@ export interface SignDocumentOptions {
   publish?: boolean;
   /** IPC URL override (default: probe 27777-27779 and pick the Vault holding this app's identity) */
   ipcUrl?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
 }
 
 export interface SignDocumentResult {
@@ -1791,6 +2239,7 @@ export interface SignDocumentResult {
  * @throws {PublishForbiddenError} Publishing asked for by an app that is not linked
  * @throws {QuotaExceededError} The signing quota for this period is used up
  * @throws {IdentityMismatchError} The Vault holds a different identity than this app is bound to
+ * @throws {LinkTokenError} The Vault no longer accepts this app's link token: link again
  */
 export async function signDocument(
   options: SignDocumentOptions,
@@ -1802,6 +2251,7 @@ export async function signDocument(
 
   const boundIdentity = getBoundIdentity();
   const publish = options.publish ?? boundIdentity !== null;
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey);
 
   // Request document signature
   const controller = new AbortController();
@@ -1832,6 +2282,7 @@ export async function signDocument(
           : undefined,
         app_name: options.appName,
         client_id: options.clientId,
+        link_token: link.token,
       }),
     });
 
@@ -1846,6 +2297,7 @@ export async function signDocument(
       if (error === 'tier_forbidden') throw new PublishForbiddenError(data.description);
       if (error === 'quota_exceeded') throw new QuotaExceededError(data.description);
       if (error === 'identity_mismatch') throw new IdentityMismatchError(getBoundIdentity() || undefined, undefined, data.description);
+      throwVaultRefusal(data, link);
 
       throw new FlowstaHolochainError(
         data.description || `Document signing failed: ${error}`,
@@ -1956,6 +2408,10 @@ export async function authenticateWithVault(
   for (const b of challengeBytes) binary += String.fromCharCode(b);
   const challengeB64 = btoa(binary);
 
+  // `clientId` here may be a companion web client's (`openWebSignedIn`), so
+  // the token of the app that linked from this storage is presented.
+  const link = vaultLinkFor(options.clientId, options.localAgentPubKey, true);
+
   const controller = new AbortController();
   // The Vault can hold the request ~55 s for an unlock, then run its 60 s
   // approval dialog - budget past both.
@@ -1973,6 +2429,7 @@ export async function authenticateWithVault(
         reason: options.reason || 'Sign in',
         app_agent_pub_key: options.localAgentPubKey,
         ...(options.clientId ? { client_id: options.clientId, scopes: options.scopes || [] } : {}),
+        link_token: link.token,
       }),
     });
     clearTimeout(timeout);
@@ -1982,6 +2439,7 @@ export async function authenticateWithVault(
       const error = data.error || 'unknown_error';
       if (error === 'vault_locked') throw new VaultLockedError();
       if (error === 'user_denied') throw new UserDeniedError();
+      throwVaultRefusal(data, link);
       throw new FlowstaHolochainError(
         data.description || `Vault authentication failed: ${error}`,
         error,
@@ -2378,6 +2836,12 @@ export interface RestoreFromVaultOptions {
   ipcUrl?: string;
   /** Backup label to restore. Default: 'latest'. */
   label?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
 }
 
 /** Result of `restoreFromVault`. */
@@ -2422,6 +2886,7 @@ export async function restoreFromVault(
       clientId: options.clientId,
       label: options.label,
       ipcUrl: options.ipcUrl,
+      localAgentPubKey: options.localAgentPubKey,
     });
     if (!backup) {
       return { totalRecords: 0, succeeded: 0, failed: [] };
@@ -2497,6 +2962,12 @@ export interface FlowstaAutoBackupConfigV2 {
   label?: string;
   /** Vault IPC URL. Default: probe 27777-27779 and pick the Vault holding this app's identity. */
   ipcUrl?: string;
+  /**
+   * The install key this app linked with. Only needed by an app that keeps
+   * more than one: it picks which link token the call presents. Default: the
+   * key linked or selected last (`selectVaultLink`). _(3.11.0)_
+   */
+  localAgentPubKey?: string;
   /**
    * Never replace a non-empty Vault backup with an empty payload (v2.6.0+).
    * Default: true. When a write is skipped, `onError` receives an
@@ -2621,6 +3092,7 @@ export function startAutoBackup(
           appName: v2.appName,
           label: v2.label,
           ipcUrl: v2.ipcUrl,
+          localAgentPubKey: v2.localAgentPubKey,
           protectNonEmpty: v2.protectNonEmpty,
         },
         payload,
@@ -2683,6 +3155,7 @@ function startAutoBackupLegacy(config: FlowstaAutoBackupConfig): () => void {
           appName: config.appName,
           label: config.label,
           ipcUrl: config.ipcUrl,
+          localAgentPubKey: config.localAgentPubKey,
           protectNonEmpty: config.protectNonEmpty,
         },
         data,
